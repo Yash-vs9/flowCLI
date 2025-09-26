@@ -85,4 +85,25 @@ public class UnoCLI {
     private static final Map<String, String> discoveredFacts = new HashMap<>();
     private static int knowledgePoints = 0;
     private static final List<String> explorationLog = new ArrayList<>();
+
+
+    private static void printPrompt() {
+        StringBuilder prompt = new StringBuilder(" ");
+        if (currentGalaxy.isEmpty()) {
+            prompt.append("Universe");
+        } else {
+            Galaxy galaxy = UNIVERSE.get(currentGalaxy);
+            prompt.append(" ").append(galaxy.getName());
+            if (!currentPlanet.isEmpty()) {
+                Planet planet = galaxy.getPlanets().get(currentPlanet);
+                prompt.append("/").append(planet.getName());
+            }
+        }
+        prompt.append(" [").append(knowledgePoints).append("] $ ");
+        System.out.print(prompt.toString());
+    }
+
+    public static void main(String[] args) {
+        printPrompt();
+    }
 }
