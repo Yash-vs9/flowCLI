@@ -1,7 +1,6 @@
 import java.util.*;
 
 public class UnoCLI {
-    // Enhanced Galaxy class
     class Galaxy {
         private String name;
         private String description;
