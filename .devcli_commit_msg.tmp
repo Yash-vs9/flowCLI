@@ -1,0 +1,3 @@
+fix(auth): enforce minimum password length of 8 characters
+
+Prevent processing of passwords shorter than 8 characters to enhance security and ensure compliance with password policies. This change stops further execution if the password length is insufficient.

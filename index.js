@@ -79,38 +79,77 @@ async function askAI(userPrompt, systemPrompt = "You are a helpful developer ass
 }
 
 // ----------------- Feature: AI Commit Message Generator -----------------
-async function featureCommitMessage() {
-  logInfo("\nAI Commit Message Generator");
+import path from "path";
 
-  // get staged diff
-  let diff;
+async function featureCommitMessage() {
+  console.log(chalk.cyan("\nAI Commit Message Generator"));
+
+  // Ask for repo path
+  const { repoPath: inputPath } = await inquirer.prompt([
+    {
+      type: "input",
+      name: "repoPath",
+      message: "Enter path to the Git repository (leave empty for current folder):",
+      default: process.cwd(),
+    },
+  ]);
+
+  // Normalize path
+  const repoPath = path.resolve(inputPath.trim());
+
+  // Ensure .git exists
+  const gitFolderExists = await fs
+    .access(path.join(repoPath, ".git"))
+    .then(() => true)
+    .catch(() => false);
+
+  if (!gitFolderExists) {
+    console.log(chalk.yellow("⚠ No Git repository found at this path."));
+    const { initRepo } = await inquirer.prompt([
+      { type: "confirm", name: "initRepo", message: "Initialize a new Git repo here?", default: false },
+    ]);
+    if (initRepo) {
+      await execP("git init", { cwd: repoPath }); // cwd handles spaces
+      console.log(chalk.green("✅ Git repository initialized."));
+    } else {
+      console.log(chalk.red("Aborting commit generator."));
+      return;
+    }
+  }
+
+  // Get staged diff
+  let diff = "";
   try {
-    // use --cached to read staged changes (what will be committed)
-    const { stdout } = await execP("git diff --cached --unified=0");
+    const { stdout } = await execP("git diff --cached --unified=0", { cwd: repoPath });
     diff = stdout.trim();
-  } catch (e) {
-    logWarn("git not available or no repo detected. Trying to continue...");
+  } catch {
     diff = "";
   }
 
+  // Fallback to manual input
   if (!diff) {
-    logWarn("No staged changes found (git diff --cached empty).");
+    console.log(chalk.yellow("No staged changes found (git diff --cached empty)."));
     const { confirm } = await inquirer.prompt([
-      { type: "confirm", name: "confirm", message: "Do you want to paste a diff or list of changed files manually?", default: false },
+      {
+        type: "confirm",
+        name: "confirm",
+        message: "Do you want to paste a diff or short description manually?",
+        default: false,
+      },
     ]);
-    if (!confirm) {
-      return;
-    }
-    const res = await inquirer.prompt([
-      { type: "editor", name: "manualDiff", message: "Paste diff or short description of changes:" },
+    if (!confirm) return;
+
+    const { manualDiff } = await inquirer.prompt([
+      { type: "input", name: "manualDiff", message: "Paste diff or short description here:" },
     ]);
-    diff = res.manualDiff || "";
+    diff = manualDiff || "";
     if (!diff) {
-      logWarn("No input provided. Aborting.");
+      console.log(chalk.red("No input provided. Aborting."));
       return;
     }
   }
 
+  // Generate AI commit message
   const spinner = ora("🤔 Generating commit message...").start();
   try {
     const prompt = `You are an expert developer following conventional commits.
@@ -137,36 +176,40 @@ Return the result in this format (only the text; no extra commentary):
     console.log(aiText);
     console.log(chalk.bold("------------------------\n"));
 
+    // Ask to commit or copy
     const { useIt, copyToClipboard } = await inquirer.prompt([
-      { type: "confirm", name: "useIt", message: "Stage commit message to 'git commit -m'? (This will run git commit --no-verify -F -)", default: false },
+      {
+        type: "confirm",
+        name: "useIt",
+        message: `Stage commit message in this repo (${repoPath}) with git commit?`,
+        default: false,
+      },
       { type: "confirm", name: "copyToClipboard", message: "Copy commit message to clipboard?", default: false },
     ]);
 
     if (copyToClipboard) {
-      // try copy via pbcopy (mac), xclip (linux) or skip
       try {
         await execP(`printf "%s" "${aiText.replace(/"/g, '\\"')}" | pbcopy`);
-        logOk("Copied to clipboard (pbcopy).");
+        console.log(chalk.green("✅ Copied to clipboard (pbcopy)."));
       } catch {
-        logWarn("Could not copy automatically (no pbcopy). Please copy manually.");
+        console.log(chalk.yellow("⚠ Could not copy automatically. Please copy manually."));
       }
     }
 
     if (useIt) {
       try {
-        // write message to temp file and pass to git commit -F
-        const tmpFile = ".devcli_commit_msg.tmp";
+        const tmpFile = path.join(repoPath, ".devcli_commit_msg.tmp");
         await fs.writeFile(tmpFile, aiText, "utf8");
-        await execP(`git commit --no-verify -F ${tmpFile}`);
+        await execP(`git commit --no-verify -F "${tmpFile}"`, { cwd: repoPath });
         await fs.unlink(tmpFile);
-        logOk("Committed with AI message.");
+        console.log(chalk.green("✅ Committed with AI message."));
       } catch (e) {
-        logErr("Git commit failed: " + (e?.message || e));
+        console.log(chalk.red("❌ Git commit failed: " + (e?.message || e)));
       }
     }
   } catch (err) {
     spinner.fail("❌ Failed to generate commit message.");
-    logErr(err.message);
+    console.log(chalk.red(err.message));
   }
 }
 
@@ -423,8 +466,7 @@ ${bodyText.slice(0, 4000)}
 \`\`\`
 Provide:
 1) A 2-line summary of what the response indicates,
-2) Common causes if it's an error,
-3) Suggested next debugging steps or usage examples (curl or code) to reproduce or fix.`;
+2) if its an error summarize it otherwise ignore`;
 
       const aiSummary = await askAI(summaryPrompt, "Backend debugging assistant", 360);
       aiSpinner.succeed("✅ AI summary ready.");
