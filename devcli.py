@@ -100,62 +100,59 @@ Format: <type>(<scope>): <title>
 async def feature_security():
     log_info("\n🔐 Dependency Security Scanner")
     scan_path = Path(inquirer.prompt([inquirer.Text('path', message="Project path (empty=current)", default=os.getcwd())])['path']).resolve()
-    
-    # Check for package files
-    package_files = []
-    for file in ['package.json', 'requirements.txt', 'Pipfile', 'pom.xml', 'build.gradle']:
-        if (scan_path / file).exists(): package_files.append(file)
-    
+
+    package_files = [f for f in ['package.json', 'requirements.txt', 'Pipfile', 'pom.xml', 'build.gradle'] if (scan_path / f).exists()]
     if not package_files:
         log_warn("No package files found (package.json, requirements.txt, etc.)")
         return
-    
+
     log_info(f"Found package files: {', '.join(package_files)}")
-    
-    with yaspin(text="🔍 Scanning dependencies...", spinner="dots") as s:
+
+    dependencies_summary = []
+
+    with yaspin(text="🔍 Reading dependencies...", spinner="dots") as s:
         try:
-            vulnerabilities = []
             for file in package_files:
                 file_path = scan_path / file
                 content = file_path.read_text()
-                
+
                 if file == 'package.json':
                     try:
                         pkg_data = json.loads(content)
                         deps = {**pkg_data.get('dependencies', {}), **pkg_data.get('devDependencies', {})}
                         for name, version in deps.items():
-                            # Simulate vulnerability check (in real app, use npm audit API)
-                            if any(vuln in name.lower() for vuln in ['lodash', 'moment', 'axios', 'express']):
-                                vulnerabilities.append(f"{name}@{version} - Potential security risk")
-                    except: pass
-                
+                            dependencies_summary.append(f"{name}@{version}")
+                    except Exception as e:
+                        log_warn(f"Failed to parse package.json: {e}")
+
                 elif file == 'requirements.txt':
                     lines = [line.strip() for line in content.split('\n') if line.strip() and not line.startswith('#')]
                     for line in lines:
-                        pkg = line.split('==')[0].split('>=')[0].split('<=')[0]
-                        if any(vuln in pkg.lower() for vuln in ['flask', 'django', 'requests', 'urllib3']):
-                            vulnerabilities.append(f"{line} - Check for known vulnerabilities")
-            
-            s.ok("✅ Scan completed.")
-            
-            if vulnerabilities:
-                log_warn(f"Found {len(vulnerabilities)} potential issues:")
-                for vuln in vulnerabilities[:10]: print(f"  ⚠️  {vuln}")
-                if len(vulnerabilities) > 10: print(f"  ... and {len(vulnerabilities)-10} more")
-            else:
-                log_ok("✅ No obvious vulnerabilities detected")
-            
-            # AI analysis
-            if vulnerabilities:
-                with yaspin(text="🧠 AI analyzing risks...", spinner="dots") as ai_s:
-                    try:
-                        vuln_text = '\n'.join(vulnerabilities[:5])
-                        analysis = await ask_ai(f"Analyze these dependency vulnerabilities:\n{vuln_text}\nProvide security recommendations.", "Security expert", 300)
-                        ai_s.ok("✅ Analysis ready.")
-                        print(f"\n{Style.BRIGHT}--- Security Analysis ---{Style.RESET_ALL}\n{analysis}\n{Style.BRIGHT}-------------------------{Style.RESET_ALL}\n")
-                    except Exception as e: ai_s.fail("❌ AI analysis failed."); log_err(str(e))
-                    
-        except Exception as e: s.fail("❌ Scan failed."); log_err(str(e))
+                        dependencies_summary.append(line)
+
+                # Additional parsing logic for other package files can be added here
+
+            if not dependencies_summary:
+                s.fail("❌ No dependencies found in package files.")
+                return
+
+            s.ok("✅ Dependencies loaded, sending to AI...")
+
+            deps_text = "\n".join(dependencies_summary)
+            prompt = f"You are a consice assistant, dont use more than 80 tokens. Given the following list of project dependencies:\n``````\nAnalyze this list for any security vulnerabilities or risks. Provide the name of those dependency which are at risk. here are the dependency {deps_text}"
+
+            with yaspin(text="🧠 AI analyzing dependencies...", spinner="dots") as ai_s:
+                try:
+                    analysis = await ask_ai(prompt, "Security expert", 600)
+                    ai_s.ok("✅ AI analysis completed.")
+                    print(f"\n{Style.BRIGHT}--- Security Analysis ---{Style.RESET_ALL}\n{analysis}\n{Style.BRIGHT}-------------------------{Style.RESET_ALL}\n")
+                except Exception as e:
+                    ai_s.fail("❌ AI analysis failed.")
+                    log_err(str(e))
+
+        except Exception as e:
+            s.fail("❌ Failed to read dependencies.")
+            log_err(str(e))
 
 def try_regex(pattern, flags, text):
     try:
