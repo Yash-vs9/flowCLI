@@ -1,29 +1,19 @@
 #!/usr/bin/env node
 
-/**
- * Enhanced AI Life Simulator CLI v2.0
- * A comprehensive AI-powered life simulation toolkit
- * 
- * Features: Life scenarios, career paths, relationships, finances, 
- * dreams, compatibility, random events, and personal growth tracking
- * 
- * Dependencies: commander chalk figlet inquirer openai dotenv ora
- * Install: npm install commander chalk figlet inquirer openai dotenv ora
- */
-
 import chalk from "chalk";
 import figlet from "figlet";
 import inquirer from "inquirer";
 import OpenAI from "openai";
 import fs from "fs/promises";
 import dotenv from "dotenv";
+import ora from "ora";
 
 dotenv.config();
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ========== Configuration ==========
+// Configuration 
 const CONFIG = {
   maxTokens: 300,
   model: "gpt-4o-mini",
@@ -31,7 +21,7 @@ const CONFIG = {
   temperature: 0.8
 };
 
-// ========== Helpers ==========
+// Helpers 
 const log = (msg) => console.log(chalk.cyan(msg));
 const success = (msg) => console.log(chalk.green(`✅ ${msg}`));
 const warn = (msg) => console.log(chalk.yellow(`⚠️  ${msg}`));
@@ -104,7 +94,7 @@ async function loadData() {
   }
 }
 
-// ========== Enhanced Features ==========
+// Enhanced Features 
 
 // 1. Advanced Life Choice Simulator
 async function simulateAdvancedChoice() {
@@ -124,11 +114,13 @@ async function simulateAdvancedChoice() {
     }
   ]);
 
-  const systemPrompt = `You are a life simulation expert. Provide realistic, balanced outcomes considering both positive and negative possibilities.`;
+  const systemPrompt = `You are a life simulation expert and mentor. Provide realistic, balanced outcomes considering both positive and negative possibilities in a consice manner under 100 tokens`;
   const prompt = `Simulate choosing "${choice}" over ${timeframe}, focusing on: ${focus.join(", ")}. 
-                 Provide specific milestones, challenges, and outcomes in 4-5 bullet points.`;
+                 Provide specific milestones, challenges, and outcomes in 2-3 bullet points only.`;
+  const spinner = ora("Thinking...").start();
 
   const result = await askAI(prompt, systemPrompt, 400);
+  spinner.succeed("Take a look :D")
   createVisualOutput(`Life Simulation: ${choice}`, result, "timeline");
   
   // Save to history
@@ -137,7 +129,7 @@ async function simulateAdvancedChoice() {
   await saveData(data);
 }
 
-// 2. AI Career Path Generator
+//  AI Career Path Generator
 async function generateCareerPath() {
   const { interests, skills, goals } = await inquirer.prompt([
     { type: "input", name: "interests", message: "🎨 Your interests/passions:" },
@@ -153,7 +145,7 @@ async function generateCareerPath() {
   createVisualOutput("Your AI-Generated Career Roadmap", result);
 }
 
-// 3. Relationship Compatibility Analyzer
+//  Relationship Compatibility Analyzer
 async function analyzeCompatibility() {
   const { person1, person2, context } = await inquirer.prompt([
     { type: "input", name: "person1", message: "👤 Person 1 traits/interests:" },
@@ -174,7 +166,7 @@ async function analyzeCompatibility() {
   createVisualOutput(`${context} Compatibility Analysis`, result);
 }
 
-// 4. Financial Future Simulator
+//  Financial Future Simulator
 async function simulateFinances() {
   const { age, income, expenses, goals } = await inquirer.prompt([
     { type: "number", name: "age", message: "🎂 Current age:" },
@@ -191,7 +183,7 @@ async function simulateFinances() {
   createVisualOutput("Financial Future Projection", result);
 }
 
-// 5. Dream Interpreter & Life Insights
+//  Dream Interpreter & Life Insights
 async function interpretDream() {
   const { dream, emotions, context } = await inquirer.prompt([
     { type: "input", name: "dream", message: "💭 Describe your dream:" },
@@ -207,7 +199,7 @@ async function interpretDream() {
   createVisualOutput("Dream Analysis & Life Insights", result);
 }
 
-// 6. Random Life Event Generator
+// Random Life Event Generator
 async function generateRandomEvent() {
   const { category, impact } = await inquirer.prompt([
     {
@@ -253,7 +245,7 @@ async function trackGrowth() {
   info(`📊 Total simulations completed: ${data.history.length}`);
 }
 
-// ========== Enhanced Menu System ==========
+//  Enhanced Menu System 
 const MENU_OPTIONS = [
   { name: "🎯 Advanced Life Choice Simulator", value: "advanced_sim" },
   { name: "🚀 AI Career Path Generator", value: "career" },
