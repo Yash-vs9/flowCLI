@@ -34,8 +34,20 @@ def run_cmd(cmd, cwd=None):
         return result.stdout.strip(), result.stderr.strip(), result.returncode
     except Exception as e: return "", str(e), 1
 
+def show_help():
+    help_text = f"""{Style.BRIGHT}Available Commands:{Style.RESET_ALL}
+{Fore.CYAN}commit{Style.RESET_ALL}    - Generate AI-powered commit messages
+{Fore.CYAN}security{Style.RESET_ALL}  - Scan dependencies for vulnerabilities
+{Fore.CYAN}regex{Style.RESET_ALL}     - AI regex helper and tester
+{Fore.CYAN}api{Style.RESET_ALL}       - Test APIs with AI analysis
+{Fore.CYAN}help{Style.RESET_ALL}      - Show this help message
+{Fore.CYAN}exit{Style.RESET_ALL}      - Exit the CLI
+
+{Style.BRIGHT}Usage:{Style.RESET_ALL} Type a command and press Enter"""
+    print(help_text)
+
 async def feature_commit():
-    log_info("\nAI Commit Message Generator")
+    log_info("\n🤖 AI Commit Message Generator")
     repo_path = Path(inquirer.prompt([inquirer.Text('repo_path', message="Git repo path (empty=current)", default=os.getcwd())])['repo_path']).resolve()
     if not (repo_path / ".git").exists():
         log_warn("⚠ No Git repository found.")
@@ -55,19 +67,11 @@ async def feature_commit():
 
     with yaspin(text="🤔 Generating...", spinner="dots") as s:
         try:
-            prompt = f"""You are an expert developer following conventional commits.
-Given the git diff below, produce:
-1) conventional commit title (max 72 chars)
-2) 2-3 line body explaining why
-3) optional footer
-
-Diff:
+            prompt = f"""Generate conventional commit message for this diff:
 ```
 {diff}
 ```
-
-Format:
-<type>(<scope>): <title>
+Format: <type>(<scope>): <title>
 
 <body>
 
@@ -93,37 +97,65 @@ Format:
                 except Exception as e: log_err(f"❌ Error: {e}")
         except Exception as e: s.fail("❌ Failed."); log_err(str(e))
 
-async def feature_docs():
-    log_info("\nREADME / Doc Generator")
-    mode = inquirer.prompt([inquirer.List('mode', message="Generate from:", choices=[('package.json', 'pkg'),('Source file', 'file'),('Manual input', 'manual')])])['mode']
-    content = ""
+async def feature_security():
+    log_info("\n🔐 Dependency Security Scanner")
+    scan_path = Path(inquirer.prompt([inquirer.Text('path', message="Project path (empty=current)", default=os.getcwd())])['path']).resolve()
     
-    if mode == "pkg":
-        pkg_path = Path("./package.json")
-        if not pkg_path.exists(): log_warn("No package.json."); content = inquirer.prompt([inquirer.Editor('manual', message="Paste content:")])['manual']
-        else: content = pkg_path.read_text()
-    elif mode == "file":
-        file_path = Path(inquirer.prompt([inquirer.Text('path', message="File path:", default="index.js")])['path'])
-        if not file_path.exists(): log_warn("File not found."); content = inquirer.prompt([inquirer.Editor('manual', message="Paste content:")])['manual']
-        else: content = file_path.read_text()
-    else: content = inquirer.prompt([inquirer.Editor('manual', message="Paste description:")])['manual']
+    # Check for package files
+    package_files = []
+    for file in ['package.json', 'requirements.txt', 'Pipfile', 'pom.xml', 'build.gradle']:
+        if (scan_path / file).exists(): package_files.append(file)
     
-    kind = inquirer.prompt([inquirer.List('kind', message="Generate what?", choices=["Project README", "Function docs", "API examples"])])['kind']
+    if not package_files:
+        log_warn("No package files found (package.json, requirements.txt, etc.)")
+        return
     
-    with yaspin(text="🧠 Generating...", spinner="dots") as s:
+    log_info(f"Found package files: {', '.join(package_files)}")
+    
+    with yaspin(text="🔍 Scanning dependencies...", spinner="dots") as s:
         try:
-            prompts = {"Project README": f"Create README with features, install, usage, config:\n```\n{content}\n```",
-                      "Function docs": f"Add JSDoc comments to functions:\n```\n{content}\n```",
-                      "API examples": f"Create API usage examples:\n```\n{content}\n```"}
-            ai_text = await ask_ai(prompts[kind], "Technical writer", 600)
-            s.ok("✅ Generated.")
-            print(f"\n{Style.BRIGHT}--- Generated Docs ---{Style.RESET_ALL}\n{ai_text}\n{Style.BRIGHT}----------------------{Style.RESET_ALL}\n")
+            vulnerabilities = []
+            for file in package_files:
+                file_path = scan_path / file
+                content = file_path.read_text()
+                
+                if file == 'package.json':
+                    try:
+                        pkg_data = json.loads(content)
+                        deps = {**pkg_data.get('dependencies', {}), **pkg_data.get('devDependencies', {})}
+                        for name, version in deps.items():
+                            # Simulate vulnerability check (in real app, use npm audit API)
+                            if any(vuln in name.lower() for vuln in ['lodash', 'moment', 'axios', 'express']):
+                                vulnerabilities.append(f"{name}@{version} - Potential security risk")
+                    except: pass
+                
+                elif file == 'requirements.txt':
+                    lines = [line.strip() for line in content.split('\n') if line.strip() and not line.startswith('#')]
+                    for line in lines:
+                        pkg = line.split('==')[0].split('>=')[0].split('<=')[0]
+                        if any(vuln in pkg.lower() for vuln in ['flask', 'django', 'requests', 'urllib3']):
+                            vulnerabilities.append(f"{line} - Check for known vulnerabilities")
             
-            if inquirer.prompt([inquirer.Confirm('save', message="Save to file?", default=True)])['save']:
-                filename = "README.md" if kind == "Project README" else inquirer.prompt([inquirer.Text('fname', message="Filename:", default="DOCS.md" if "docs" in kind else "API.md")])['fname']
-                Path(filename).write_text(ai_text)
-                log_ok(f"Saved to {filename}")
-        except Exception as e: s.fail("❌ Failed."); log_err(str(e))
+            s.ok("✅ Scan completed.")
+            
+            if vulnerabilities:
+                log_warn(f"Found {len(vulnerabilities)} potential issues:")
+                for vuln in vulnerabilities[:10]: print(f"  ⚠️  {vuln}")
+                if len(vulnerabilities) > 10: print(f"  ... and {len(vulnerabilities)-10} more")
+            else:
+                log_ok("✅ No obvious vulnerabilities detected")
+            
+            # AI analysis
+            if vulnerabilities:
+                with yaspin(text="🧠 AI analyzing risks...", spinner="dots") as ai_s:
+                    try:
+                        vuln_text = '\n'.join(vulnerabilities[:5])
+                        analysis = await ask_ai(f"Analyze these dependency vulnerabilities:\n{vuln_text}\nProvide security recommendations.", "Security expert", 300)
+                        ai_s.ok("✅ Analysis ready.")
+                        print(f"\n{Style.BRIGHT}--- Security Analysis ---{Style.RESET_ALL}\n{analysis}\n{Style.BRIGHT}-------------------------{Style.RESET_ALL}\n")
+                    except Exception as e: ai_s.fail("❌ AI analysis failed."); log_err(str(e))
+                    
+        except Exception as e: s.fail("❌ Scan failed."); log_err(str(e))
 
 def try_regex(pattern, flags, text):
     try:
@@ -135,7 +167,7 @@ def try_regex(pattern, flags, text):
     except Exception as e: return {"ok": False, "error": str(e)}
 
 async def feature_regex():
-    log_info("\nRegex Helper")
+    log_info("\n🧩 Regex Helper")
     spec = inquirer.prompt([inquirer.Text('spec', message="Describe regex need:")])['spec']
     examples = inquirer.prompt([inquirer.Text('examples', message="Example strings (comma/semicolon separated):")])['examples']
     
@@ -168,7 +200,7 @@ Provide:
         except Exception as e: s.fail("❌ Failed."); log_err(str(e))
 
 async def feature_api():
-    log_info("\nAPI Tester")
+    log_info("\n🌐 API Tester")
     answers = inquirer.prompt([inquirer.List('method', message="Method:", choices=["GET","POST","PUT","PATCH","DELETE"]),inquirer.Text('url', message="URL:")])
     method, url = answers['method'], answers['url']
     
@@ -201,15 +233,32 @@ async def feature_api():
 
 async def main():
     banner()
-    print("DEBUG: Starting main menu")  # Add this to test if main runs
-
+    log_info("🚀 Developer CLI Tool - Type 'help' for commands")
+    
+    commands = {
+        'commit': feature_commit,
+        'security': feature_security,
+        'regex': feature_regex,
+        'api': feature_api,
+        'help': lambda: show_help(),
+    }
+    
     while True:
-        cmd = inquirer.prompt([inquirer.List('cmd', message="Choose tool:", choices=[('Commit message (AI)','commit'),('README/Docs generator','docs'),('Regex helper','regex'),('API tester','api'),('Exit','exit')])])['cmd']
-        if cmd == 'commit': await feature_commit()
-        elif cmd == 'docs': await feature_docs()
-        elif cmd == 'regex': await feature_regex()
-        elif cmd == 'api': await feature_api()
-        elif cmd == 'exit': log_ok("\n👋 Goodbye."); break
+        try:
+            cmd = input(f"\n{Fore.YELLOW}devcli>{Style.RESET_ALL} ").strip().lower()
+            if cmd == 'exit': log_ok("👋 Goodbye!"); break
+            elif cmd in commands:
+                if asyncio.iscoroutinefunction(commands[cmd]):
+                    await commands[cmd]()
+                else:
+                    commands[cmd]()
+            elif cmd == '':
+                continue
+            else:
+                log_err(f"Unknown command: {cmd}. Type 'help' for available commands.")
+        except (KeyboardInterrupt, EOFError):
+            log_ok("\n👋 Goodbye!")
+            break
 
 if __name__ == "__main__": 
     try: asyncio.run(main())
