@@ -1,328 +1,489 @@
 #!/usr/bin/env node
+/**
+ * devcli - AI developer helper CLI
+ *
+ * Features:
+ *  - commit  : AI Commit Message Generator (reads staged changes)
+ *  - docs    : README / Doc Generator from file or package.json
+ *  - regex   : Regex helper from plain-language spec
+ *  - api     : API tester (calls API + AI summarizes response)
+ *
+ * Dependencies: openai, inquirer, chalk, figlet, ora, axios, dotenv
+ * Install: npm i openai inquirer chalk figlet ora axios dotenv
+ *
+ * Usage: node index.js
+ */
 
+import fs from "fs/promises";
+import { existsSync } from "fs";
+import { exec } from "child_process";
+import { promisify } from "util";
+import inquirer from "inquirer";
 import chalk from "chalk";
 import figlet from "figlet";
-import inquirer from "inquirer";
-import OpenAI from "openai";
-import fs from "fs/promises";
-import dotenv from "dotenv";
 import ora from "ora";
+import dotenv from "dotenv";
+import OpenAI from "openai";
+import axios from "axios";
 
 dotenv.config();
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const execP = promisify(exec);
 
-// Configuration 
-const CONFIG = {
-  maxTokens: 300,
-  model: "gpt-4o-mini",
-  saveFile: ".life-sim-data.json",
-  temperature: 0.8
-};
-
-// Helpers 
-const log = (msg) => console.log(chalk.cyan(msg));
-const success = (msg) => console.log(chalk.green(`✅ ${msg}`));
-const warn = (msg) => console.log(chalk.yellow(`⚠️  ${msg}`));
-const error = (msg) => console.log(chalk.red(`❌ ${msg}`));
-const info = (msg) => console.log(chalk.blue(`ℹ️  ${msg}`));
-
-function banner() {
-  console.log(chalk.magenta(
-    figlet.textSync("Life Sim Pro", { horizontalLayout: "full" })
-  ));
-  console.log(chalk.gray("🤖 Enhanced AI Life Simulator v2.0\n"));
+if (!process.env.OPENAI_API_KEY) {
+  console.error(chalk.red("ERROR: OPENAI_API_KEY not found. Put it in .env"));
+  process.exit(1);
 }
 
-// Enhanced OpenAI call with spinner and token limit
-async function askAI(prompt, systemPrompt = "", maxTokens = CONFIG.maxTokens) {
-  try {
-    const messages = [
-      ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
-      { role: "user", content: prompt }
-    ];
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const res = await client.chat.completions.create({
-      model: CONFIG.model,
-      messages,
+// ----------------- Helpers -----------------
+const banner = () =>
+  console.log(chalk.magenta(figlet.textSync("devcli", { horizontalLayout: "full" })));
+
+function logOk(msg) {
+  console.log(chalk.green(msg));
+}
+function logInfo(msg) {
+  console.log(chalk.cyan(msg));
+}
+function logWarn(msg) {
+  console.log(chalk.yellow(msg));
+}
+function logErr(msg) {
+  console.error(chalk.red(msg));
+}
+
+/**
+ * askAI: wrapper to call chat completion
+ * @param {string} userPrompt
+ * @param {string} systemPrompt optional
+ * @param {number} maxTokens optional
+ */
+async function askAI(userPrompt, systemPrompt = "You are a helpful developer assistant.", maxTokens = 400) {
+  try {
+    const response = await client.chat.completions.create({
+      model: "gpt-4.1-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
       max_tokens: maxTokens,
-      temperature: CONFIG.temperature,
+      temperature: 0.2,
     });
-
-    return res.choices[0].message.content.trim();
-  } catch (e) {
-    error(`API Error: ${e.message}`);
-    return "⚠️ Simulation temporarily unavailable. Please check your API key.";
+    return response.choices?.[0]?.message?.content?.trim() ?? "";
+  } catch (err) {
+    // surface useful error message
+    const msg = err?.message ?? String(err);
+    throw new Error("AI request failed: " + msg);
   }
 }
 
-// Enhanced ASCII visualization
-function createVisualOutput(title, content, type = "box") {
-  console.log(`\n${chalk.magenta('═'.repeat(60))}`);
-  console.log(chalk.magenta(`🎯 ${title.toUpperCase()}`));
-  console.log(chalk.magenta('═'.repeat(60)));
-  
-  if (type === "timeline") {
-    content.split('\n').forEach((line, i) => {
-      if (line.trim()) {
-        console.log(chalk.gray(`${i + 1}. `) + chalk.white(line.trim()));
+// ----------------- Feature: AI Commit Message Generator -----------------
+async function featureCommitMessage() {
+  logInfo("\nAI Commit Message Generator");
+
+  // get staged diff
+  let diff;
+  try {
+    // use --cached to read staged changes (what will be committed)
+    const { stdout } = await execP("git diff --cached --unified=0");
+    diff = stdout.trim();
+  } catch (e) {
+    logWarn("git not available or no repo detected. Trying to continue...");
+    diff = "";
+  }
+
+  if (!diff) {
+    logWarn("No staged changes found (git diff --cached empty).");
+    const { confirm } = await inquirer.prompt([
+      { type: "confirm", name: "confirm", message: "Do you want to paste a diff or list of changed files manually?", default: false },
+    ]);
+    if (!confirm) {
+      return;
+    }
+    const res = await inquirer.prompt([
+      { type: "editor", name: "manualDiff", message: "Paste diff or short description of changes:" },
+    ]);
+    diff = res.manualDiff || "";
+    if (!diff) {
+      logWarn("No input provided. Aborting.");
+      return;
+    }
+  }
+
+  const spinner = ora("🤔 Generating commit message...").start();
+  try {
+    const prompt = `You are an expert developer following conventional commits.
+Given the staged git diff or change summary below, produce:
+1) a concise conventional commit title (max 72 chars),
+2) a 2-3 line body explaining why the change was made,
+3) optionally a footer with metadata (e.g., RELATED-ISSUE).
+
+Diff / summary:
+\`\`\`
+${diff}
+\`\`\`
+
+Return the result in this format (only the text; no extra commentary):
+<type>(<scope>): <title>
+
+<body lines>
+
+<footer if any>
+`;
+    const aiText = await askAI(prompt, "You are an assistant that writes concise conventional commit messages.", 220);
+    spinner.succeed("✅ Commit message generated.");
+    console.log(chalk.bold("\n--- Suggested Commit ---"));
+    console.log(aiText);
+    console.log(chalk.bold("------------------------\n"));
+
+    const { useIt, copyToClipboard } = await inquirer.prompt([
+      { type: "confirm", name: "useIt", message: "Stage commit message to 'git commit -m'? (This will run git commit --no-verify -F -)", default: false },
+      { type: "confirm", name: "copyToClipboard", message: "Copy commit message to clipboard?", default: false },
+    ]);
+
+    if (copyToClipboard) {
+      // try copy via pbcopy (mac), xclip (linux) or skip
+      try {
+        await execP(`printf "%s" "${aiText.replace(/"/g, '\\"')}" | pbcopy`);
+        logOk("Copied to clipboard (pbcopy).");
+      } catch {
+        logWarn("Could not copy automatically (no pbcopy). Please copy manually.");
       }
-    });
+    }
+
+    if (useIt) {
+      try {
+        // write message to temp file and pass to git commit -F
+        const tmpFile = ".devcli_commit_msg.tmp";
+        await fs.writeFile(tmpFile, aiText, "utf8");
+        await execP(`git commit --no-verify -F ${tmpFile}`);
+        await fs.unlink(tmpFile);
+        logOk("Committed with AI message.");
+      } catch (e) {
+        logErr("Git commit failed: " + (e?.message || e));
+      }
+    }
+  } catch (err) {
+    spinner.fail("❌ Failed to generate commit message.");
+    logErr(err.message);
+  }
+}
+
+// ----------------- Feature: README / Doc Generator -----------------
+async function featureDocsGenerator() {
+  logInfo("\nREADME / Doc Generator");
+
+  const { mode } = await inquirer.prompt([
+    {
+      type: "list",
+      name: "mode",
+      message: "Generate docs from:",
+      choices: [
+        { name: "package.json (project metadata)", value: "pkg" },
+        { name: "Single source file (generate README or function docs)", value: "file" },
+        { name: "Manual description (I will paste project description)", value: "manual" },
+      ],
+    },
+  ]);
+
+  let content = "";
+  let sourcePath = null;
+
+  if (mode === "pkg") {
+    // find package.json in cwd
+    const pkgPath = "./package.json";
+    if (!existsSync(pkgPath)) {
+      logWarn("No package.json found in current directory.");
+      const { manual } = await inquirer.prompt([{ type: "editor", name: "manual", message: "Paste package.json or project description:" }]);
+      content = manual;
+    } else {
+      content = await fs.readFile(pkgPath, "utf8");
+      sourcePath = pkgPath;
+    }
+  } else if (mode === "file") {
+    const { path } = await inquirer.prompt([{ type: "input", name: "path", message: "Path to source file (relative):", default: "index.js" }]);
+    if (!existsSync(path)) {
+      logWarn("File not found. Please paste file content.");
+      const { manual } = await inquirer.prompt([{ type: "editor", name: "manual", message: "Paste file content:" }]);
+      content = manual;
+    } else {
+      content = await fs.readFile(path, "utf8");
+      sourcePath = path;
+    }
   } else {
-    console.log(chalk.white(content));
+    const { manual } = await inquirer.prompt([{ type: "editor", name: "manual", message: "Paste project description and goals:" }]);
+    content = manual;
   }
-  
-  console.log(chalk.magenta('═'.repeat(60)));
-}
 
-// Save user data
-async function saveData(data) {
+  const { kind } = await inquirer.prompt([
+    { type: "list", name: "kind", message: "What do you want generated?", choices: ["Project README", "Function-level docs / JSDoc", "API Usage Examples"] },
+  ]);
+
+  const spinner = ora("🧠 Generating docs...").start();
+
   try {
-    await fs.writeFile(CONFIG.saveFile, JSON.stringify(data, null, 2));
-  } catch (e) {
-    warn("Could not save data");
+    let systemPrompt = "You are an expert technical writer who writes clear README and code documentation for developers.";
+    let userPrompt = "";
+
+    if (kind === "Project README") {
+      userPrompt = `Create a professional README for this project. Include: short description, features, installation steps, usage examples, configuration (env vars), and minimal examples. Keep it concise but complete.
+
+Source content:
+\`\`\`
+${content}
+\`\`\``;
+    } else if (kind === "Function-level docs / JSDoc") {
+      userPrompt = `Produce JSDoc-style comments for functions in the source file below. Only output the commented source (with JSDoc above functions). If there are multiple functions, document each. Source:
+\`\`\`
+${content}
+\`\`\``;
+    } else {
+      userPrompt = `Create a short "API usage" section describing how to call the project's public API (example commands or curl). Source:
+\`\`\`
+${content}
+\`\`\``;
+    }
+
+    const aiText = await askAI(userPrompt, systemPrompt, 600);
+    spinner.succeed("✅ Docs generated.");
+
+    console.log(chalk.bold("\n--- Generated Docs ---\n"));
+    console.log(aiText);
+    console.log(chalk.bold("\n----------------------\n"));
+
+    const { save } = await inquirer.prompt([{ type: "confirm", name: "save", message: "Save output to a file in current dir?", default: true }]);
+    if (save) {
+      let filename = "README.md";
+      if (kind !== "Project README") {
+        const { fname } = await inquirer.prompt([{ type: "input", name: "fname", message: "Filename to save as:", default: kind === "Function-level docs / JSDoc" ? "DOCS.md" : "API.md" }]);
+        filename = fname;
+      }
+      await fs.writeFile(filename, aiText, "utf8");
+      logOk(`Saved to ${filename}`);
+    }
+  } catch (err) {
+    spinner.fail("❌ Failed to generate docs.");
+    logErr(err.message);
   }
 }
 
-async function loadData() {
+// ----------------- Feature: Regex Helper -----------------
+function tryTestRegex(pattern, flags, testText) {
   try {
-    const data = await fs.readFile(CONFIG.saveFile, 'utf8');
-    return JSON.parse(data);
+    const re = new RegExp(pattern, flags);
+    const matches = testText.match(re);
+    return { ok: true, matches };
   } catch (e) {
-    return { history: [], preferences: {} };
+    return { ok: false, error: e.message };
   }
 }
 
-// Enhanced Features 
+async function featureRegexHelper() {
+  logInfo("\nRegex Helper");
 
-// 1. Advanced Life Choice Simulator
-async function simulateAdvancedChoice() {
-  const { choice, timeframe, focus } = await inquirer.prompt([
-    { type: "input", name: "choice", message: "🎯 Life choice to simulate:" },
-    { 
-      type: "list", 
-      name: "timeframe", 
-      message: "📅 Timeframe:",
-      choices: ["1 year", "5 years", "10 years", "20 years"]
-    },
-    {
-      type: "checkbox",
-      name: "focus",
-      message: "🎨 Focus areas (select multiple):",
-      choices: ["Career", "Relationships", "Health", "Finances", "Happiness", "Personal Growth"]
+  const { spec } = await inquirer.prompt([{ type: "input", name: "spec", message: "Describe what you need (e.g., 'match email addresses' or 'capture date YYYY-MM-DD'):" }]);
+  const { examples } = await inquirer.prompt([{ type: "editor", name: "examples", message: "Provide example strings (one per line) to test with:" }]);
+
+  const spinner = ora("🧠 Creating regex...").start();
+  try {
+    const prompt = `You are an expert at regular expressions.
+Generate a concise regular expression (with any flags) to match the user's spec. Provide:
+- The regex pattern only (no surrounding slashes),
+- Suggested flags (e.g., i, g, m) or "none",
+- A short explanation (1-2 lines),
+- Example usage in JavaScript (RegExp constructor).
+Do not include extraneous commentary.
+
+User spec:
+${spec}
+
+Examples:
+${examples}
+`;
+    const aiResp = await askAI(prompt, "Regex expert", 220);
+    spinner.succeed("✅ Regex generated.");
+    console.log(chalk.bold("\n--- AI Suggestion ---"));
+    console.log(aiResp);
+    console.log(chalk.bold("---------------------\n"));
+
+    // attempt to parse simple pattern + flags from AI reply heuristically
+    // (Look for "pattern: ..." or first code fence or first /.../ )
+    let pattern = null;
+    let flags = "";
+    // try to find code fence
+    const fenceMatch = aiResp.match(/```(?:regex|js)?\s*\/?(.+?)\/([gimsuy]*)\s*```/s);
+    if (fenceMatch) {
+      pattern = fenceMatch[1].trim();
+      flags = fenceMatch[2] || "";
+    } else {
+      // try first /.../ occurrence
+      const slashMatch = aiResp.match(/\/(.+?)\/([gimsuy]*)/);
+      if (slashMatch) {
+        pattern = slashMatch[1];
+        flags = slashMatch[2] || "";
+      } else {
+        // fallback: first line or "pattern:" line
+        const patLine = aiResp.split("\n").find(l => /pattern[:\s]/i.test(l)) || aiResp.split("\n")[0];
+        pattern = (patLine.split(":").pop() || patLine).trim();
+      }
     }
-  ]);
 
-  const systemPrompt = `You are a life simulation expert and mentor. Provide realistic, balanced outcomes considering both positive and negative possibilities in a consice manner under 100 tokens`;
-  const prompt = `Simulate choosing "${choice}" over ${timeframe}, focusing on: ${focus.join(", ")}. 
-                 Provide specific milestones, challenges, and outcomes in 2-3 bullet points only.`;
-  const spinner = ora("Thinking...").start();
-
-  const result = await askAI(prompt, systemPrompt, 400);
-  spinner.succeed("Take a look :D")
-  createVisualOutput(`Life Simulation: ${choice}`, result, "timeline");
-  
-  // Save to history
-  const data = await loadData();
-  data.history.push({ type: "simulation", choice, timeframe, result, date: new Date() });
-  await saveData(data);
-}
-
-//  AI Career Path Generator
-async function generateCareerPath() {
-  const { interests, skills, goals } = await inquirer.prompt([
-    { type: "input", name: "interests", message: "🎨 Your interests/passions:" },
-    { type: "input", name: "skills", message: "💪 Current skills:" },
-    { type: "input", name: "goals", message: "🎯 Career goals:" }
-  ]);
-
-  const systemPrompt = `Generate a practical 5-step career roadmap with specific actions, timelines, and skill development.`;
-  const prompt = `Create a career path for someone with interests in "${interests}", 
-                 skills in "${skills}", and goals: "${goals}". Include specific steps, resources, and timelines.`;
-
-  const result = await askAI(prompt, systemPrompt, 450);
-  createVisualOutput("Your AI-Generated Career Roadmap", result);
-}
-
-//  Relationship Compatibility Analyzer
-async function analyzeCompatibility() {
-  const { person1, person2, context } = await inquirer.prompt([
-    { type: "input", name: "person1", message: "👤 Person 1 traits/interests:" },
-    { type: "input", name: "person2", message: "👥 Person 2 traits/interests:" },
-    { 
-      type: "list", 
-      name: "context", 
-      message: "💝 Relationship type:",
-      choices: ["Romantic", "Friendship", "Business Partnership", "Roommates"]
+    // Ask user for test
+    const { testNow } = await inquirer.prompt([{ type: "confirm", name: "testNow", message: "Run tests with your example strings now?", default: true }]);
+    if (testNow) {
+      const testText = examples;
+      const testResult = tryTestRegex(pattern, flags, testText);
+      if (!testResult.ok) {
+        logErr("Regex invalid: " + testResult.error);
+      } else {
+        console.log(chalk.bold("Matches:"));
+        console.log(testResult.matches);
+      }
     }
-  ]);
-
-  const systemPrompt = `Analyze compatibility objectively, highlighting both strengths and potential challenges.`;
-  const prompt = `Analyze ${context.toLowerCase()} compatibility between "${person1}" and "${person2}". 
-                 Provide compatibility score, strengths, challenges, and tips.`;
-
-  const result = await askAI(prompt, systemPrompt);
-  createVisualOutput(`${context} Compatibility Analysis`, result);
+  } catch (err) {
+    spinner.fail("❌ Failed to create regex.");
+    logErr(err.message);
+  }
 }
 
-//  Financial Future Simulator
-async function simulateFinances() {
-  const { age, income, expenses, goals } = await inquirer.prompt([
-    { type: "number", name: "age", message: "🎂 Current age:" },
-    { type: "number", name: "income", message: "💰 Monthly income ($):" },
-    { type: "number", name: "expenses", message: "💸 Monthly expenses ($):" },
-    { type: "input", name: "goals", message: "🏆 Financial goals:" }
+// ----------------- Feature: API Tester (AI-assisted) -----------------
+async function featureApiTester() {
+  logInfo("\nAPI Tester (AI-assisted)");
+
+  const { method, url } = await inquirer.prompt([
+    { type: "list", name: "method", message: "HTTP method:", choices: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+    { type: "input", name: "url", message: "Full URL (including protocol):" },
   ]);
 
-  const systemPrompt = `Provide realistic financial projections and actionable advice.`;
-  const prompt = `Financial simulation for ${age}-year-old, $${income} income, $${expenses} expenses, goals: "${goals}". 
-                 Show 5, 10, 20-year projections with savings, investments, and goal achievement timeline.`;
-
-  const result = await askAI(prompt, systemPrompt, 400);
-  createVisualOutput("Financial Future Projection", result);
-}
-
-//  Dream Interpreter & Life Insights
-async function interpretDream() {
-  const { dream, emotions, context } = await inquirer.prompt([
-    { type: "input", name: "dream", message: "💭 Describe your dream:" },
-    { type: "input", name: "emotions", message: "😊 Emotions in the dream:" },
-    { type: "input", name: "context", message: "📋 Current life situation:" }
+  const { addHeaders } = await inquirer.prompt([
+    { type: "confirm", name: "addHeaders", message: "Add custom headers?", default: false }
   ]);
 
-  const systemPrompt = `Interpret dreams psychologically, connecting symbols to potential life meanings and insights.`;
-  const prompt = `Interpret this dream: "${dream}" with emotions "${emotions}" for someone in this situation: "${context}". 
-                 Provide symbolic meanings and life insights.`;
-
-  const result = await askAI(prompt, systemPrompt);
-  createVisualOutput("Dream Analysis & Life Insights", result);
-}
-
-// Random Life Event Generator
-async function generateRandomEvent() {
-  const { category, impact } = await inquirer.prompt([
-    {
-      type: "list",
-      name: "category",
-      message: "🎲 Event category:",
-      choices: ["Career", "Relationship", "Adventure", "Challenge", "Opportunity", "Random"]
-    },
-    {
-      type: "list",
-      name: "impact",
-      message: "⚡ Impact level:",
-      choices: ["Minor", "Moderate", "Major", "Life-changing"]
+  let headers = {};
+  if (addHeaders) {
+    const { raw } = await inquirer.prompt([
+      { type: "input", name: "raw", message: "Paste headers as JSON (e.g., {\"Authorization\":\"Bearer ...\"}):" }
+    ]);
+    try {
+      headers = JSON.parse(raw);
+    } catch {
+      logWarn("Invalid JSON for headers — ignored.");
+      headers = {};
     }
-  ]);
-
-  const prompt = `Generate a realistic ${impact.toLowerCase()} ${category.toLowerCase()} life event. 
-                 Describe the event, immediate effects, and potential long-term consequences.`;
-
-  const result = await askAI(prompt, "", 250);
-  createVisualOutput(`Random ${impact} ${category} Event`, result);
-}
-
-// 7. Personal Growth Tracker
-async function trackGrowth() {
-  const data = await loadData();
-  
-  if (data.history.length === 0) {
-    info("No simulation history found. Try other features first!");
-    return;
   }
 
-  const { reflection } = await inquirer.prompt([
-    { type: "input", name: "reflection", message: "💡 Recent personal insights or changes:" }
-  ]);
+  let data = undefined;
+  if (["POST", "PUT", "PATCH"].includes(method)) {
+    const { sendBody } = await inquirer.prompt([
+      { type: "confirm", name: "sendBody", message: "Do you want to send a request body?", default: false }
+    ]);
 
-  const prompt = `Based on this reflection: "${reflection}" and previous life simulations, 
-                 provide personalized growth insights, patterns, and next steps for development.`;
+    if (sendBody) {
+      const { body } = await inquirer.prompt([
+        { type: "input", name: "body", message: "Enter request body (JSON or raw):" }
+      ]);
 
-  const result = await askAI(prompt, "", 350);
-  createVisualOutput("Personal Growth Analysis", result);
-  
-  info(`📊 Total simulations completed: ${data.history.length}`);
-}
-
-//  Enhanced Menu System 
-const MENU_OPTIONS = [
-  { name: "🎯 Advanced Life Choice Simulator", value: "advanced_sim" },
-  { name: "🚀 AI Career Path Generator", value: "career" },
-  { name: "💕 Relationship Compatibility", value: "compatibility" },
-  { name: "💰 Financial Future Simulator", value: "finance" },
-  { name: "💭 Dream Interpreter", value: "dream" },
-  { name: "🎲 Random Life Event Generator", value: "random" },
-  { name: "📈 Personal Growth Tracker", value: "growth" },
-  { name: "📊 View Simulation History", value: "history" },
-  { name: "⚙️  Settings", value: "settings" },
-  { name: "🚪 Exit", value: "exit" }
-];
-
-async function showHistory() {
-  const data = await loadData();
-  if (data.history.length === 0) {
-    info("No simulation history found.");
-    return;
-  }
-  
-  console.log(chalk.magenta("\n📊 Simulation History:"));
-  data.history.slice(-5).forEach((entry, i) => {
-    console.log(chalk.gray(`${i + 1}. ${entry.type} - ${entry.choice || entry.date}`));
-  });
-}
-
-async function showSettings() {
-  const { newLimit } = await inquirer.prompt([
-    { 
-      type: "number", 
-      name: "newLimit", 
-      message: `Current token limit: ${CONFIG.maxTokens}. New limit:`,
-      default: CONFIG.maxTokens
+      try {
+        data = JSON.parse(body); // parse JSON if possible
+      } catch {
+        data = body; // fallback to raw string
+      }
     }
-  ]);
-  
-  CONFIG.maxTokens = newLimit;
-  success(`Token limit updated to ${newLimit}`);
+  }
+
+  const spinner = ora("🌐 Calling API...").start();
+  try {
+    const res = await axios.request({ method, url, headers, data, timeout: 20000 });
+    spinner.succeed(`✅ ${res.status} ${res.statusText}`);
+
+    // Pretty print response (truncate big bodies)
+    const maxPrint = 3000;
+    let bodyText;
+    try {
+      bodyText = typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2);
+    } catch {
+      bodyText = String(res.data);
+    }
+    if (bodyText.length > maxPrint) {
+      console.log(chalk.gray(bodyText.slice(0, maxPrint) + "\n... (truncated) ..."));
+    } else {
+      console.log(bodyText);
+    }
+
+    // Ask AI to summarize the response
+    const aiSpinner = ora("🧠 Summarizing response with AI...").start();
+    try {
+      const summaryPrompt = `You are an experienced developer. Given this HTTP response body and status: 
+Status: ${res.status} ${res.statusText}
+Headers: ${JSON.stringify(res.headers)}
+Body:
+\`\`\`
+${bodyText.slice(0, 4000)}
+\`\`\`
+Provide:
+1) A 2-line summary of what the response indicates,
+2) Common causes if it's an error,
+3) Suggested next debugging steps or usage examples (curl or code) to reproduce or fix.`;
+
+      const aiSummary = await askAI(summaryPrompt, "Backend debugging assistant", 360);
+      aiSpinner.succeed("✅ AI summary ready.");
+      console.log(chalk.bold("\n--- AI Summary & Suggestions ---\n"));
+      console.log(aiSummary);
+      console.log(chalk.bold("\n---------------------------------\n"));
+    } catch (aiErr) {
+      aiSpinner.fail("❌ AI summary failed.");
+      logErr(aiErr.message);
+    }
+  } catch (err) {
+    spinner.fail("❌ API call failed.");
+    logErr(err.message || err);
+  }
 }
 
-// Main execution
-async function mainLoop() {
+// ----------------- Main menu -----------------
+async function mainMenu() {
   banner();
-  
   let exit = false;
   while (!exit) {
-    const { action } = await inquirer.prompt([{
-      type: "list",
-      name: "action",
-      message: "🤖 Choose your simulation:",
-      choices: MENU_OPTIONS,
-    }]);
+    const { cmd } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "cmd",
+        message: "Choose a tool",
+        choices: [
+          { name: "Commit message (AI)", value: "commit" },
+          { name: "Generate README / Docs", value: "docs" },
+          { name: "Regex helper", value: "regex" },
+          { name: "API tester (AI-assisted)", value: "api" },
+          { name: "Exit", value: "exit" },
+        ],
+      },
+    ]);
 
-    try {
-      switch (action) {
-        case "advanced_sim": await simulateAdvancedChoice(); break;
-        case "career": await generateCareerPath(); break;
-        case "compatibility": await analyzeCompatibility(); break;
-        case "finance": await simulateFinances(); break;
-        case "dream": await interpretDream(); break;
-        case "random": await generateRandomEvent(); break;
-        case "growth": await trackGrowth(); break;
-        case "history": await showHistory(); break;
-        case "settings": await showSettings(); break;
-        case "exit":
-          exit = true;
-          console.log(chalk.green("\n🌟 Thanks for exploring life's possibilities! 👋"));
-          break;
-      }
-      
-      if (!exit) {
-        await inquirer.prompt([{ type: "input", name: "continue", message: "\nPress Enter to continue..." }]);
-      }
-    } catch (e) {
-      error(`Something went wrong: ${e.message}`);
+    switch (cmd) {
+      case "commit":
+        await featureCommitMessage();
+        break;
+      case "docs":
+        await featureDocsGenerator();
+        break;
+      case "regex":
+        await featureRegexHelper();
+        break;
+      case "api":
+        await featureApiTester();
+        break;
+      case "exit":
+        exit = true;
+        logOk("\n👋 Goodbye.");
+        break;
     }
   }
 }
 
-mainLoop();
+// Run
+mainMenu().catch((e) => {
+  logErr("Fatal error: " + (e?.message || e));
+  process.exit(1);
+});
