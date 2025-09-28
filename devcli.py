@@ -48,8 +48,7 @@ def start_tracking():
     def timer():
         global active_time, last_active
         while tracking:
-            if time.time() - last_active < 60:  
-                active_time += 1
+            if time.time() - last_active < 60:  active_time += 1
             time.sleep(1)
 
     threading.Thread(target=timer, daemon=True).start()
@@ -68,7 +67,6 @@ def show_help():
 {Fore.CYAN}scanfile{Style.RESET_ALL}  - Scan for large files
 {Fore.CYAN}track{Style.RESET_ALL}     - Track active time
 {Fore.CYAN}exit{Style.RESET_ALL}      - Exit the CLI
-
 {Style.BRIGHT}Usage:{Style.RESET_ALL} Type a command and press Enter"""
     print(help_text)
 
@@ -84,7 +82,7 @@ async def feature_commit():
         if inquirer.prompt([inquirer.Confirm('init', message="Initialize git repo?", default=False)])['init']:
             stdout, stderr, code = run_cmd("git init", cwd=repo_path)
             if code == 0: log_ok("✅ Git repo initialized.")
-            else: log_err(f"❌ Failed: {stderr}"); return
+            else: log_err(f"Failed: {stderr}"); return
         else: log_err("Aborting."); return
 
     # Get staged diff
@@ -92,8 +90,7 @@ async def feature_commit():
     diff = stdout.strip()
     if not diff:
         log_warn("No staged changes found.")
-        if not inquirer.prompt([inquirer.Confirm('confirm', message="Paste diff manually?", default=False)])['confirm']:
-            return
+        if not inquirer.prompt([inquirer.Confirm('confirm', message="Paste diff manually?", default=False)])['confirm']:return
         diff = inquirer.prompt([inquirer.Text('manual_diff', message="Paste diff:")])['manual_diff'] or ""
         if not diff: log_err("No input. Aborting."); return
 
@@ -107,7 +104,6 @@ Format: <type>(<scope>): <title>
 
     ai_text = ""
 
-    # Run async AI call in a thread to keep spinner active
     def run_ai():
         nonlocal ai_text
         ai_text = asyncio.run(ask_ai(prompt, "Conventional commit assistant.", 200))
@@ -117,16 +113,12 @@ Format: <type>(<scope>): <title>
         try:
             t.start()
             t.join()  # wait for AI call to complete
-            s.ok("✅ Done")
+            s.ok("Done")
         except Exception as e:
-            s.fail("❌ Failed")
+            s.fail("Failed")
             log_err(str(e))
             return
-
-    # Show AI suggestion
     print(f"\n{Style.BRIGHT}--- Suggested Commit ---{Style.RESET_ALL}\n{ai_text}\n")
-
-    # Ask user to commit or copy
     answers = inquirer.prompt([
         inquirer.Confirm('use', message=f"Commit in {repo_path}?", default=False),
         inquirer.Confirm('copy', message="Copy to clipboard?", default=False)
@@ -144,10 +136,9 @@ Format: <type>(<scope>): <title>
             tmp.write_text(ai_text)
             stdout, stderr, code = run_cmd(f'git commit --no-verify -F "{tmp}"', cwd=repo_path)
             tmp.unlink()
-            if code == 0: log_ok("✅ Committed.")
-            else: log_err(f"❌ Commit failed: {stderr}")
-        except Exception as e:
-            log_err(f"❌ Error: {e}")
+            if code == 0: log_ok("Committed.")
+            else: log_err(f"Commit failed: {stderr}")
+        except Exception as e:log_err(f"Error: {e}")
 async def feature_track():
     global tracking
     log_info("\n⏱️ Active Time Tracker")
@@ -180,11 +171,9 @@ async def feature_scanfiles():
                 for fname in files:
                     try:
                         fpath = Path(root) / fname
-                        if not fpath.is_file():
-                            continue
+                        if not fpath.is_file():continue
                         fsize = fpath.stat().st_size
-                        if fsize >= size_threshold:
-                            large_files.append((str(fpath), fsize))
+                        if fsize >= size_threshold:large_files.append((str(fpath), fsize))
                     except:
                         continue
             s.ok("Scan complete.")
@@ -218,8 +207,7 @@ async def feature_security():
                     try:
                         pkg_data = json.loads(content)
                         deps = {**pkg_data.get('dependencies', {}), **pkg_data.get('devDependencies', {})}
-                        for name, version in deps.items():
-                            dependencies_summary.append(f"{name}@{version}")
+                        for name, version in deps.items():dependencies_summary.append(f"{name}@{version}")
                     except Exception as e:
                         log_warn(f"Failed to parse package.json: {e}")
 
@@ -238,7 +226,7 @@ async def feature_security():
             with yaspin(text="AI analyzing dependencies...", spinner="dots") as ai_s:
                 try:
                     analysis = await ask_ai(prompt, "Security expert", 600)
-                    ai_s.ok("✅ AI analysis completed.")
+                    ai_s.ok(" AI analysis completed.")
                     print(f"\n{Style.BRIGHT}--- Security Analysis ---{Style.RESET_ALL}\n{analysis}\n{Style.BRIGHT}-------------------------{Style.RESET_ALL}\n")
                 except Exception as e:ai_s.fail(" AI analysis failed.");log_err(str(e))
 
@@ -262,7 +250,7 @@ async def feature_api():
     with yaspin(text=" Calling...", spinner="dots") as s:
         try:
             response = requests.request(method=method, url=url, headers=headers, json=data if isinstance(data,dict) else None, data=data if isinstance(data,str) else None, timeout=20)
-            s.ok(f"✅ {response.status_code} {response.reason}")
+            s.ok(f" {response.status_code} {response.reason}")
             
             body_text = response.text
             print(f"{Fore.WHITE}{body_text[:3000]}{'...(truncated)' if len(body_text)>3000 else ''}{Style.RESET_ALL}")
@@ -293,16 +281,11 @@ async def main():
             cmd = input(f"\n{Fore.YELLOW}devcli>{Style.RESET_ALL} ").strip().lower()
             if cmd == 'exit': log_ok(" Goodbye!"); break
             elif cmd in commands:
-                if asyncio.iscoroutinefunction(commands[cmd]):
-                    await commands[cmd]()
-                else:
-                    commands[cmd]()
-            elif cmd == '':
-                continue
-            else:
-                log_err(f"Unknown command: {cmd}. Type 'help' for available commands.")
-        except (KeyboardInterrupt, EOFError):
-            break
+                if asyncio.iscoroutinefunction(commands[cmd]):await commands[cmd]()
+                else:commands[cmd]()
+            elif cmd == '':continue
+            else:log_err(f"Unknown command: {cmd}. Type 'help' for available commands.")
+        except (KeyboardInterrupt, EOFError):break
 if __name__ == "__main__": 
     try: asyncio.run(main())
     except Exception as e: log_err(f"Fatal: {e}"); sys.exit(1)
