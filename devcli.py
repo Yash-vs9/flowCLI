@@ -8,6 +8,8 @@ from yaspin import yaspin
 from dotenv import load_dotenv
 import openai
 import requests
+from pynput import keyboard
+import threading, time
 
 init(autoreset=True)
 load_dotenv()
@@ -15,8 +17,10 @@ if not os.getenv("OPENAI_API_KEY"):
     print(f"{Fore.RED}ERROR: OPENAI_API_KEY not found. Put it in .env{Style.RESET_ALL}")
     sys.exit(1)
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-def banner(): print(f"{Fore.MAGENTA}{pyfiglet.figlet_format('devcli', font='slant')}{Style.RESET_ALL}")
+active_time = 0      # in seconds
+last_active = time.time()
+tracking = False
+def banner(): print(f"{Fore.MAGENTA}{pyfiglet.figlet_format('flowCLI', font='slant')}{Style.RESET_ALL}")
 def log_ok(msg): print(f"{Fore.GREEN}{msg}{Style.RESET_ALL}")
 def log_info(msg): print(f"{Fore.CYAN}{msg}{Style.RESET_ALL}")
 def log_warn(msg): print(f"{Fore.YELLOW}{msg}{Style.RESET_ALL}")
@@ -27,7 +31,26 @@ async def ask_ai(prompt, sys_prompt="You are a helpful developer assistant.", ma
         response = client.chat.completions.create(model="gpt-4o-mini",messages=[{"role":"system","content":sys_prompt},{"role":"user","content":prompt}],max_tokens=max_tokens,temperature=0.2)
         return response.choices[0].message.content.strip() if response.choices else ""
     except Exception as e: raise Exception(f"AI request failed: {str(e)}")
+def on_key_press(key):
+    global last_active
+    last_active = time.time()
 
+def start_tracking():
+    global tracking
+    if tracking: return
+    tracking = True
+    listener = keyboard.Listener(on_press=on_key_press)
+    listener.daemon = True
+    listener.start()
+
+    def timer():
+        global active_time, last_active
+        while tracking:
+            if time.time() - last_active < 60:  
+                active_time += 1
+            time.sleep(1)
+
+    threading.Thread(target=timer, daemon=True).start()
 def run_cmd(cmd, cwd=None):
     try:
         result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
@@ -40,21 +63,22 @@ def show_help():
 {Fore.CYAN}security{Style.RESET_ALL}  - Scan dependencies for vulnerabilities
 {Fore.CYAN}api{Style.RESET_ALL}       - Test APIs with AI analysis
 {Fore.CYAN}help{Style.RESET_ALL}      - Show this help message
-{Fore.CYAN}scanfile{Style.RESET_ALL}      - Scan for large files
+{Fore.CYAN}scanfile{Style.RESET_ALL}  - Scan for large files
+{Fore.CYAN}track{Style.RESET_ALL}     - Track active time
 {Fore.CYAN}exit{Style.RESET_ALL}      - Exit the CLI
 
 {Style.BRIGHT}Usage:{Style.RESET_ALL} Type a command and press Enter"""
     print(help_text)
 
 async def feature_commit():
-    log_info("\n🤖 AI Commit Message Generator")
+    log_info("\nAI Commit Message Generator")
     repo_path = Path(inquirer.prompt([inquirer.Text('repo_path', message="Git repo path (empty=current)", default=os.getcwd())])['repo_path']).resolve()
     if not (repo_path / ".git").exists():
         log_warn("⚠ No Git repository found.")
         if inquirer.prompt([inquirer.Confirm('init', message="Initialize git repo?", default=False)])['init']:
             stdout, stderr, code = run_cmd("git init", cwd=repo_path)
-            if code == 0: log_ok("✅ Git repo initialized.")
-            else: log_err(f"❌ Failed: {stderr}"); return
+            if code == 0: log_ok("Git repo initialized.")
+            else: log_err(f" Failed: {stderr}"); return
         else: log_err("Aborting."); return
     
     stdout, stderr, code = run_cmd("git diff --cached --unified=0", cwd=repo_path)
@@ -87,20 +111,32 @@ Format: <type>(<scope>): <title>
                     tmp.write_text(ai_text)
                     stdout, stderr, code = run_cmd(f'git commit --no-verify -F "{tmp}"', cwd=repo_path)
                     tmp.unlink()
-                    if code == 0: log_ok("✅ Committed.")
+                    if code == 0: log_ok(" Committed.")
                 except Exception as e: log_err(f"Error: {e}")
         except Exception as e: s.fail(" Failed.")
         log_err(str(e))
-
-
+async def feature_track():
+    global tracking
+    log_info("\n⏱️ Active Time Tracker")
+    start_tracking()
+    log_info("Tracking keyboard activity... Press Ctrl+C to stop.\n")
+    try:
+        while True:
+            mins, secs = divmod(active_time, 60)
+            hrs, mins = divmod(mins, 60)
+            print(f"\r🕒 Active Time: {int(hrs):02}:{int(mins):02}:{int(secs):02}", end="")
+            time.sleep(1)
+    except KeyboardInterrupt:
+        tracking = False  
+        mins, secs = divmod(active_time, 60)
+        hrs, mins = divmod(mins, 60)
+        log_ok(f"\nTotal Active Time: {int(hrs)}h {int(mins)}m {int(secs)}s")
 async def feature_scanfiles():
-    log_info("\n🗂️  Large File Finder")
+    log_info("\nLarge File Finder")
     scan_path = Path(inquirer.prompt([inquirer.Text('path', message="Project path (empty=current)", default=os.getcwd())])['path']).resolve()
     threshold_mb = inquirer.prompt([inquirer.Text('thresh', message="Minimum large file size (MB, default=5)", default="5")])['thresh']
-    try:
-        size_threshold = int(float(threshold_mb) * 1024 * 1024)
-    except:
-        size_threshold = 5 * 1024 * 1024
+    try:size_threshold = int(float(threshold_mb) * 1024 * 1024)
+    except: size_threshold = 5 * 1024 * 1024
 
     large_files = []
     log_info(f"Scanning {scan_path} for files larger than {size_threshold // (1024*1024)} MB...")
@@ -128,14 +164,6 @@ async def feature_scanfiles():
             print(f"{f} ({sz // (1024*1024)}MB)")
     else: print("No large files found.")
 
-
-    # Show report
-    # print(f"\n{Style.BRIGHT}Large files:{Style.RESET_ALL}")
-    # for f, sz in sorted(large_files, key=lambda x: -x[1]):
-    #     print(f"{f} ({sz//(1024*1024)}MB)")
-
-
-
 async def feature_security():
     log_info("\n🔐 Dependency Security Scanner")
     scan_path = Path(inquirer.prompt([inquirer.Text('path', message="Project path (empty=current)", default=os.getcwd())])['path']).resolve()
@@ -147,7 +175,7 @@ async def feature_security():
 
     dependencies_summary = []
 
-    with yaspin(text="🔍 Reading dependencies...", spinner="dots") as s:
+    with yaspin(text="Reading dependencies...", spinner="dots") as s:
         try:
             for file in package_files:
                 file_path = scan_path / file
@@ -167,11 +195,9 @@ async def feature_security():
                     for line in lines:
                         dependencies_summary.append(line)
 
-                # Additional parsing logic for other package files can be added here
-
             if not dependencies_summary: return (s.fail(" No dependencies found in package files.") or None)
 
-            s.ok("✅ Dependencies loaded, sending to AI...")
+            s.ok(" Dependencies loaded, sending to AI...")
 
             deps_text = "\n".join(dependencies_summary)
             prompt = f"You are a consice assistant, dont use more than 80 tokens. Given the following list of project dependencies:\n``````\nAnalyze this list for any security vulnerabilities or risks. Provide the name of those dependency which are at risk. here are the dependency {deps_text}"
@@ -184,51 +210,8 @@ async def feature_security():
                 except Exception as e:ai_s.fail(" AI analysis failed.");log_err(str(e))
 
         except Exception as e: s.fail(" Failed to read dependencies.");log_err(str(e))
-
-# def try_regex(pattern, flags, text):
-#     try:
-#         flag_int = 0
-#         if 'i' in flags: flag_int |= re.IGNORECASE
-#         if 'm' in flags: flag_int |= re.MULTILINE  
-#         if 's' in flags: flag_int |= re.DOTALL
-#         return {"ok": True, "matches": re.compile(pattern, flag_int).findall(text)}
-#     except Exception as e: return {"ok": False, "error": str(e)}
-
-# async def feature_regex():
-#     log_info("\n🧩 Regex Helper")
-#     spec = inquirer.prompt([inquirer.Text('spec', message="Describe regex need:")])['spec']
-#     examples = inquirer.prompt([inquirer.Text('examples', message="Example strings (comma/semicolon separated):")])['examples']
-    
-#     with yaspin(text="🧠 Creating regex...", spinner="dots") as s:
-#         try:
-#             prompt = f"""Generate regex for: {spec}
-# Examples: {examples}
-# Provide:
-# - Pattern (no slashes)
-# - Flags (i,g,m or none)  
-# - Brief explanation
-# - Python usage"""
-#             ai_resp = await ask_ai(prompt, "Regex expert", 220)
-#             s.ok("✅ Generated.")
-#             print(f"\n{Style.BRIGHT}--- AI Suggestion ---{Style.RESET_ALL}\n{ai_resp}\n{Style.BRIGHT}---------------------{Style.RESET_ALL}\n")
-            
-#             pattern, flags = None, ""
-#             fence_match = re.search(r'```(?:regex|python)?\s*/?(.+?)/([gimsux]*)\s*```', ai_resp, re.DOTALL)
-#             if fence_match: pattern, flags = fence_match.group(1).strip(), fence_match.group(2) or ""
-#             else:
-#                 slash_match = re.search(r'/(.+?)/([gimsux]*)', ai_resp)
-#                 if slash_match: pattern, flags = slash_match.group(1), slash_match.group(2) or ""
-#                 else: pattern = ai_resp.split('\n')[0].strip()
-            
-#             if inquirer.prompt([inquirer.Confirm('test', message="Test with examples?", default=True)])['test']:
-#                 test_strings = [s.strip() for s in re.split('[,;]+', examples) if s.strip()]
-#                 result = try_regex(pattern, flags, ' '.join(test_strings))
-#                 if not result["ok"]: log_err(f"Invalid: {result['error']}")
-#                 else: print(f"{Style.BRIGHT}Matches:{Style.RESET_ALL}\n{result['matches']}")
-#         except Exception as e: s.fail(" Failed."); log_err(str(e))
-
 async def feature_api():
-    log_info("\n🌐 API Tester")
+    log_info("\n API Tester")
     answers = inquirer.prompt([inquirer.List('method', message="Method:", choices=["GET","POST","PUT","PATCH","DELETE"]),inquirer.Text('url', message="URL:")])
     method, url = answers['method'], answers['url']
     
@@ -243,7 +226,7 @@ async def feature_api():
         try: data = json.loads(body)
         except: data = body
     
-    with yaspin(text="🌐 Calling...", spinner="dots") as s:
+    with yaspin(text=" Calling...", spinner="dots") as s:
         try:
             response = requests.request(method=method, url=url, headers=headers, json=data if isinstance(data,dict) else None, data=data if isinstance(data,str) else None, timeout=20)
             s.ok(f"✅ {response.status_code} {response.reason}")
@@ -251,7 +234,7 @@ async def feature_api():
             body_text = response.text
             print(f"{Fore.WHITE}{body_text[:3000]}{'...(truncated)' if len(body_text)>3000 else ''}{Style.RESET_ALL}")
             
-            with yaspin(text="🧠 AI analyzing...", spinner="dots") as ai_s:
+            with yaspin(text="AI analyzing...", spinner="dots") as ai_s:
                 try:
                     summary = await ask_ai(f"Analyze HTTP response:\nStatus: {response.status_code}\nBody: ```{body_text[:4000]}```\nProvide 2-line summary.", "Backend debugger", 360)
                     ai_s.ok(" Analysis ready.")
@@ -261,12 +244,12 @@ async def feature_api():
 
 async def main():
     banner()
-    log_info("🚀 Developer CLI Tool - Type 'help' for commands")
+    log_info("Developer CLI Tool - Type 'help' for commands")
     
     commands = {
         'commit': feature_commit,
         'security': feature_security,
-        # 'regex': feature_regex,
+        'track':feature_track,
         'api': feature_api,
         'help': lambda: show_help(),
         'scanfile':feature_scanfiles
@@ -275,7 +258,7 @@ async def main():
     while True:
         try:
             cmd = input(f"\n{Fore.YELLOW}devcli>{Style.RESET_ALL} ").strip().lower()
-            if cmd == 'exit': log_ok("👋 Goodbye!"); break
+            if cmd == 'exit': log_ok(" Goodbye!"); break
             elif cmd in commands:
                 if asyncio.iscoroutinefunction(commands[cmd]):
                     await commands[cmd]()
@@ -286,9 +269,7 @@ async def main():
             else:
                 log_err(f"Unknown command: {cmd}. Type 'help' for available commands.")
         except (KeyboardInterrupt, EOFError):
-            log_ok("\n👋 Goodbye!")
             break
-
 if __name__ == "__main__": 
     try: asyncio.run(main())
     except Exception as e: log_err(f"Fatal: {e}"); sys.exit(1)
