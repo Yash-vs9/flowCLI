@@ -8,6 +8,7 @@ from yaspin import yaspin
 from dotenv import load_dotenv
 import openai
 import requests
+import hashlib
 
 init(autoreset=True)
 load_dotenv()
@@ -41,6 +42,7 @@ def show_help():
 {Fore.CYAN}regex{Style.RESET_ALL}     - AI regex helper and tester
 {Fore.CYAN}api{Style.RESET_ALL}       - Test APIs with AI analysis
 {Fore.CYAN}help{Style.RESET_ALL}      - Show this help message
+{Fore.CYAN}scanfile{Style.RESET_ALL}      - Scan for large files
 {Fore.CYAN}exit{Style.RESET_ALL}      - Exit the CLI
 
 {Style.BRIGHT}Usage:{Style.RESET_ALL} Type a command and press Enter"""
@@ -96,6 +98,52 @@ Format: <type>(<scope>): <title>
                     else: log_err(f"❌ Failed: {stderr}")
                 except Exception as e: log_err(f"❌ Error: {e}")
         except Exception as e: s.fail("❌ Failed."); log_err(str(e))
+
+
+async def feature_scanfiles():
+    log_info("\n🗂️  Large File Finder")
+    scan_path = Path(inquirer.prompt([inquirer.Text('path', message="Project path (empty=current)", default=os.getcwd())])['path']).resolve()
+    threshold_mb = inquirer.prompt([inquirer.Text('thresh', message="Minimum large file size (MB, default=5)", default="5")])['thresh']
+    try:
+        size_threshold = int(float(threshold_mb) * 1024 * 1024)
+    except:
+        size_threshold = 5 * 1024 * 1024
+
+    large_files = []
+    log_info(f"Scanning {scan_path} for files larger than {size_threshold // (1024*1024)} MB...")
+
+    with yaspin(text="🔎 Scanning files...", spinner="dots") as s:
+        try:
+            for root, dirs, files in os.walk(scan_path):
+                for fname in files:
+                    try:
+                        fpath = Path(root) / fname
+                        if not fpath.is_file():
+                            continue
+                        fsize = fpath.stat().st_size
+                        if fsize >= size_threshold:
+                            large_files.append((str(fpath), fsize))
+                    except:
+                        continue
+            s.ok("✅ Scan complete.")
+        except Exception as e:
+            s.fail(f"❌ Scan error: {e}")
+            return
+
+    print(f"\n{Style.BRIGHT}Large files (>{size_threshold // (1024*1024)} MB):{Style.RESET_ALL}")
+    if large_files:
+        for f, sz in sorted(large_files, key=lambda x: -x[1]):
+            print(f"{f} ({sz // (1024*1024)}MB)")
+    else:
+        print("No large files found.")
+
+
+    # Show report
+    # print(f"\n{Style.BRIGHT}Large files:{Style.RESET_ALL}")
+    # for f, sz in sorted(large_files, key=lambda x: -x[1]):
+    #     print(f"{f} ({sz//(1024*1024)}MB)")
+
+
 
 async def feature_security():
     log_info("\n🔐 Dependency Security Scanner")
@@ -238,6 +286,7 @@ async def main():
         'regex': feature_regex,
         'api': feature_api,
         'help': lambda: show_help(),
+        'scanfile':feature_scanfiles
     }
     
     while True:
