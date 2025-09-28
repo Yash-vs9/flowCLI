@@ -8,7 +8,6 @@ from yaspin import yaspin
 from dotenv import load_dotenv
 import openai
 import requests
-import hashlib
 
 init(autoreset=True)
 load_dotenv()
@@ -66,23 +65,18 @@ async def feature_commit():
         diff = inquirer.prompt([inquirer.Text('manual_diff', message="Paste diff:")])['manual_diff'] or ""
         if not diff: log_err("No input. Aborting."); return
 
-    with yaspin(text="🤔 Generating...", spinner="dots") as s:
+    with yaspin(text="Generating...", spinner="dots") as s:
         try:
             prompt = f"""Generate conventional commit message for this diff:
 ```
 {diff}
 ```
 Format: <type>(<scope>): <title>
-
 <body>
-
-<footer>"""
-            ai_text = await ask_ai(prompt, "Conventional commit assistant.", 220)
-            s.ok("✅ Generated.")
+"""
+            ai_text = await ask_ai(prompt, "Conventional commit assistant.", 200)
             print(f"\n{Style.BRIGHT}--- Suggested Commit ---{Style.RESET_ALL}")
             print(ai_text)
-            print(f"{Style.BRIGHT}------------------------{Style.RESET_ALL}\n")
-            
             answers = inquirer.prompt([inquirer.Confirm('use', message=f"Commit in {repo_path}?", default=False),inquirer.Confirm('copy', message="Copy to clipboard?", default=False)])
             if answers['copy']:
                 try: subprocess.run(['pbcopy'], input=ai_text, text=True); log_ok("✅ Copied.")
@@ -94,9 +88,9 @@ Format: <type>(<scope>): <title>
                     stdout, stderr, code = run_cmd(f'git commit --no-verify -F "{tmp}"', cwd=repo_path)
                     tmp.unlink()
                     if code == 0: log_ok("✅ Committed.")
-                    else: log_err(f"❌ Failed: {stderr}")
-                except Exception as e: log_err(f"❌ Error: {e}")
-        except Exception as e: s.fail("❌ Failed."); log_err(str(e))
+                except Exception as e: log_err(f"Error: {e}")
+        except Exception as e: s.fail(" Failed.")
+        log_err(str(e))
 
 
 async def feature_scanfiles():
@@ -111,7 +105,7 @@ async def feature_scanfiles():
     large_files = []
     log_info(f"Scanning {scan_path} for files larger than {size_threshold // (1024*1024)} MB...")
 
-    with yaspin(text="🔎 Scanning files...", spinner="dots") as s:
+    with yaspin(text="Scanning files...", spinner="dots") as s:
         try:
             for root, dirs, files in os.walk(scan_path):
                 for fname in files:
@@ -124,17 +118,15 @@ async def feature_scanfiles():
                             large_files.append((str(fpath), fsize))
                     except:
                         continue
-            s.ok("✅ Scan complete.")
+            s.ok("Scan complete.")
         except Exception as e:
-            s.fail(f"❌ Scan error: {e}")
-            return
+            s.fail(f"Scan error: {e}"); return
 
     print(f"\n{Style.BRIGHT}Large files (>{size_threshold // (1024*1024)} MB):{Style.RESET_ALL}")
     if large_files:
         for f, sz in sorted(large_files, key=lambda x: -x[1]):
             print(f"{f} ({sz // (1024*1024)}MB)")
-    else:
-        print("No large files found.")
+    else: print("No large files found.")
 
 
     # Show report
@@ -149,9 +141,7 @@ async def feature_security():
     scan_path = Path(inquirer.prompt([inquirer.Text('path', message="Project path (empty=current)", default=os.getcwd())])['path']).resolve()
 
     package_files = [f for f in ['package.json', 'requirements.txt', 'Pipfile', 'pom.xml', 'build.gradle'] if (scan_path / f).exists()]
-    if not package_files:
-        log_warn("No package files found (package.json, requirements.txt, etc.)")
-        return
+    if not package_files: return log_warn("No package files found (package.json, requirements.txt, etc.)")
 
     log_info(f"Found package files: {', '.join(package_files)}")
 
@@ -179,36 +169,30 @@ async def feature_security():
 
                 # Additional parsing logic for other package files can be added here
 
-            if not dependencies_summary:
-                s.fail("❌ No dependencies found in package files.")
-                return
+            if not dependencies_summary: return (s.fail(" No dependencies found in package files.") or None)
 
             s.ok("✅ Dependencies loaded, sending to AI...")
 
             deps_text = "\n".join(dependencies_summary)
             prompt = f"You are a consice assistant, dont use more than 80 tokens. Given the following list of project dependencies:\n``````\nAnalyze this list for any security vulnerabilities or risks. Provide the name of those dependency which are at risk. here are the dependency {deps_text}"
 
-            with yaspin(text="🧠 AI analyzing dependencies...", spinner="dots") as ai_s:
+            with yaspin(text="AI analyzing dependencies...", spinner="dots") as ai_s:
                 try:
                     analysis = await ask_ai(prompt, "Security expert", 600)
                     ai_s.ok("✅ AI analysis completed.")
                     print(f"\n{Style.BRIGHT}--- Security Analysis ---{Style.RESET_ALL}\n{analysis}\n{Style.BRIGHT}-------------------------{Style.RESET_ALL}\n")
-                except Exception as e:
-                    ai_s.fail("❌ AI analysis failed.")
-                    log_err(str(e))
+                except Exception as e:ai_s.fail(" AI analysis failed.");log_err(str(e))
 
-        except Exception as e:
-            s.fail("❌ Failed to read dependencies.")
-            log_err(str(e))
+        except Exception as e: s.fail(" Failed to read dependencies.");log_err(str(e))
 
-def try_regex(pattern, flags, text):
-    try:
-        flag_int = 0
-        if 'i' in flags: flag_int |= re.IGNORECASE
-        if 'm' in flags: flag_int |= re.MULTILINE  
-        if 's' in flags: flag_int |= re.DOTALL
-        return {"ok": True, "matches": re.compile(pattern, flag_int).findall(text)}
-    except Exception as e: return {"ok": False, "error": str(e)}
+# def try_regex(pattern, flags, text):
+#     try:
+#         flag_int = 0
+#         if 'i' in flags: flag_int |= re.IGNORECASE
+#         if 'm' in flags: flag_int |= re.MULTILINE  
+#         if 's' in flags: flag_int |= re.DOTALL
+#         return {"ok": True, "matches": re.compile(pattern, flag_int).findall(text)}
+#     except Exception as e: return {"ok": False, "error": str(e)}
 
 # async def feature_regex():
 #     log_info("\n🧩 Regex Helper")
@@ -241,7 +225,7 @@ def try_regex(pattern, flags, text):
 #                 result = try_regex(pattern, flags, ' '.join(test_strings))
 #                 if not result["ok"]: log_err(f"Invalid: {result['error']}")
 #                 else: print(f"{Style.BRIGHT}Matches:{Style.RESET_ALL}\n{result['matches']}")
-#         except Exception as e: s.fail("❌ Failed."); log_err(str(e))
+#         except Exception as e: s.fail(" Failed."); log_err(str(e))
 
 async def feature_api():
     log_info("\n🌐 API Tester")
@@ -270,10 +254,10 @@ async def feature_api():
             with yaspin(text="🧠 AI analyzing...", spinner="dots") as ai_s:
                 try:
                     summary = await ask_ai(f"Analyze HTTP response:\nStatus: {response.status_code}\nBody: ```{body_text[:4000]}```\nProvide 2-line summary.", "Backend debugger", 360)
-                    ai_s.ok("✅ Analysis ready.")
+                    ai_s.ok(" Analysis ready.")
                     print(f"\n{Style.BRIGHT}--- AI Analysis ---{Style.RESET_ALL}\n{summary}\n{Style.BRIGHT}-------------------{Style.RESET_ALL}\n")
-                except Exception as e: ai_s.fail("❌ AI failed."); log_err(str(e))
-        except Exception as e: s.fail("❌ Failed."); log_err(str(e))
+                except Exception as e: ai_s.fail(" AI failed."); log_err(str(e))
+        except Exception as e: s.fail(" Failed."); log_err(str(e))
 
 async def main():
     banner()
