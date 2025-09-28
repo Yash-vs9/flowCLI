@@ -39,7 +39,6 @@ def show_help():
     help_text = f"""{Style.BRIGHT}Available Commands:{Style.RESET_ALL}
 {Fore.CYAN}commit{Style.RESET_ALL}    - Generate AI-powered commit messages
 {Fore.CYAN}security{Style.RESET_ALL}  - Scan dependencies for vulnerabilities
-{Fore.CYAN}regex{Style.RESET_ALL}     - AI regex helper and tester
 {Fore.CYAN}api{Style.RESET_ALL}       - Test APIs with AI analysis
 {Fore.CYAN}help{Style.RESET_ALL}      - Show this help message
 {Fore.CYAN}scanfile{Style.RESET_ALL}      - Scan for large files
@@ -211,38 +210,38 @@ def try_regex(pattern, flags, text):
         return {"ok": True, "matches": re.compile(pattern, flag_int).findall(text)}
     except Exception as e: return {"ok": False, "error": str(e)}
 
-async def feature_regex():
-    log_info("\n🧩 Regex Helper")
-    spec = inquirer.prompt([inquirer.Text('spec', message="Describe regex need:")])['spec']
-    examples = inquirer.prompt([inquirer.Text('examples', message="Example strings (comma/semicolon separated):")])['examples']
+# async def feature_regex():
+#     log_info("\n🧩 Regex Helper")
+#     spec = inquirer.prompt([inquirer.Text('spec', message="Describe regex need:")])['spec']
+#     examples = inquirer.prompt([inquirer.Text('examples', message="Example strings (comma/semicolon separated):")])['examples']
     
-    with yaspin(text="🧠 Creating regex...", spinner="dots") as s:
-        try:
-            prompt = f"""Generate regex for: {spec}
-Examples: {examples}
-Provide:
-- Pattern (no slashes)
-- Flags (i,g,m or none)  
-- Brief explanation
-- Python usage"""
-            ai_resp = await ask_ai(prompt, "Regex expert", 220)
-            s.ok("✅ Generated.")
-            print(f"\n{Style.BRIGHT}--- AI Suggestion ---{Style.RESET_ALL}\n{ai_resp}\n{Style.BRIGHT}---------------------{Style.RESET_ALL}\n")
+#     with yaspin(text="🧠 Creating regex...", spinner="dots") as s:
+#         try:
+#             prompt = f"""Generate regex for: {spec}
+# Examples: {examples}
+# Provide:
+# - Pattern (no slashes)
+# - Flags (i,g,m or none)  
+# - Brief explanation
+# - Python usage"""
+#             ai_resp = await ask_ai(prompt, "Regex expert", 220)
+#             s.ok("✅ Generated.")
+#             print(f"\n{Style.BRIGHT}--- AI Suggestion ---{Style.RESET_ALL}\n{ai_resp}\n{Style.BRIGHT}---------------------{Style.RESET_ALL}\n")
             
-            pattern, flags = None, ""
-            fence_match = re.search(r'```(?:regex|python)?\s*/?(.+?)/([gimsux]*)\s*```', ai_resp, re.DOTALL)
-            if fence_match: pattern, flags = fence_match.group(1).strip(), fence_match.group(2) or ""
-            else:
-                slash_match = re.search(r'/(.+?)/([gimsux]*)', ai_resp)
-                if slash_match: pattern, flags = slash_match.group(1), slash_match.group(2) or ""
-                else: pattern = ai_resp.split('\n')[0].strip()
+#             pattern, flags = None, ""
+#             fence_match = re.search(r'```(?:regex|python)?\s*/?(.+?)/([gimsux]*)\s*```', ai_resp, re.DOTALL)
+#             if fence_match: pattern, flags = fence_match.group(1).strip(), fence_match.group(2) or ""
+#             else:
+#                 slash_match = re.search(r'/(.+?)/([gimsux]*)', ai_resp)
+#                 if slash_match: pattern, flags = slash_match.group(1), slash_match.group(2) or ""
+#                 else: pattern = ai_resp.split('\n')[0].strip()
             
-            if inquirer.prompt([inquirer.Confirm('test', message="Test with examples?", default=True)])['test']:
-                test_strings = [s.strip() for s in re.split('[,;]+', examples) if s.strip()]
-                result = try_regex(pattern, flags, ' '.join(test_strings))
-                if not result["ok"]: log_err(f"Invalid: {result['error']}")
-                else: print(f"{Style.BRIGHT}Matches:{Style.RESET_ALL}\n{result['matches']}")
-        except Exception as e: s.fail("❌ Failed."); log_err(str(e))
+#             if inquirer.prompt([inquirer.Confirm('test', message="Test with examples?", default=True)])['test']:
+#                 test_strings = [s.strip() for s in re.split('[,;]+', examples) if s.strip()]
+#                 result = try_regex(pattern, flags, ' '.join(test_strings))
+#                 if not result["ok"]: log_err(f"Invalid: {result['error']}")
+#                 else: print(f"{Style.BRIGHT}Matches:{Style.RESET_ALL}\n{result['matches']}")
+#         except Exception as e: s.fail("❌ Failed."); log_err(str(e))
 
 async def feature_api():
     log_info("\n🌐 API Tester")
@@ -283,7 +282,7 @@ async def main():
     commands = {
         'commit': feature_commit,
         'security': feature_security,
-        'regex': feature_regex,
+        # 'regex': feature_regex,
         'api': feature_api,
         'help': lambda: show_help(),
         'scanfile':feature_scanfiles
