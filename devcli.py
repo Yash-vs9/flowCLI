@@ -6,6 +6,8 @@ from colorama import init,Fore,Style
 import pyfiglet
 from yaspin import yaspin
 from dotenv import load_dotenv
+import asyncio
+from threading import Thread
 import openai
 import requests
 from pynput import keyboard
@@ -71,50 +73,81 @@ def show_help():
     print(help_text)
 
 async def feature_commit():
-    log_info("\nAI Commit Message Generator")
-    repo_path = Path(inquirer.prompt([inquirer.Text('repo_path', message="Git repo path (empty=current)", default=os.getcwd())])['repo_path']).resolve()
+    log_info("\n🤖 AI Commit Message Generator")
+    repo_path = Path(
+        inquirer.prompt([inquirer.Text('repo_path', message="Git repo path (empty=current)", default=os.getcwd())])['repo_path']
+    ).resolve()
+
+    # Initialize git if not exists
     if not (repo_path / ".git").exists():
         log_warn("⚠ No Git repository found.")
         if inquirer.prompt([inquirer.Confirm('init', message="Initialize git repo?", default=False)])['init']:
             stdout, stderr, code = run_cmd("git init", cwd=repo_path)
-            if code == 0: log_ok("Git repo initialized.")
-            else: log_err(f" Failed: {stderr}"); return
+            if code == 0: log_ok("✅ Git repo initialized.")
+            else: log_err(f"❌ Failed: {stderr}"); return
         else: log_err("Aborting."); return
-    
+
+    # Get staged diff
     stdout, stderr, code = run_cmd("git diff --cached --unified=0", cwd=repo_path)
     diff = stdout.strip()
     if not diff:
         log_warn("No staged changes found.")
-        if not inquirer.prompt([inquirer.Confirm('confirm', message="Paste diff manually?", default=False)])['confirm']: return
+        if not inquirer.prompt([inquirer.Confirm('confirm', message="Paste diff manually?", default=False)])['confirm']:
+            return
         diff = inquirer.prompt([inquirer.Text('manual_diff', message="Paste diff:")])['manual_diff'] or ""
         if not diff: log_err("No input. Aborting."); return
 
-    with yaspin(text="Generating...", spinner="dots") as s:
-        try:
-            prompt = f"""Generate conventional commit message for this diff:
+    prompt = f"""Generate conventional commit message for this diff:
 ```
 {diff}
 ```
 Format: <type>(<scope>): <title>
 <body>
 """
-            ai_text = await ask_ai(prompt, "Conventional commit assistant.", 200)
-            print(f"\n{Style.BRIGHT}--- Suggested Commit ---{Style.RESET_ALL}")
-            print(ai_text)
-            answers = inquirer.prompt([inquirer.Confirm('use', message=f"Commit in {repo_path}?", default=False),inquirer.Confirm('copy', message="Copy to clipboard?", default=False)])
-            if answers['copy']:
-                try: subprocess.run(['pbcopy'], input=ai_text, text=True); log_ok("✅ Copied.")
-                except: log_warn("⚠ Copy failed.")
-            if answers['use']:
-                try:
-                    tmp = repo_path / ".devcli_tmp"
-                    tmp.write_text(ai_text)
-                    stdout, stderr, code = run_cmd(f'git commit --no-verify -F "{tmp}"', cwd=repo_path)
-                    tmp.unlink()
-                    if code == 0: log_ok(" Committed.")
-                except Exception as e: log_err(f"Error: {e}")
-        except Exception as e: s.fail(" Failed.")
-        log_err(str(e))
+
+    ai_text = ""
+
+    # Run async AI call in a thread to keep spinner active
+    def run_ai():
+        nonlocal ai_text
+        ai_text = asyncio.run(ask_ai(prompt, "Conventional commit assistant.", 200))
+
+    t = Thread(target=run_ai)
+    with yaspin(text="Generating...", spinner="dots") as s:
+        try:
+            t.start()
+            t.join()  # wait for AI call to complete
+            s.ok("✅ Done")
+        except Exception as e:
+            s.fail("❌ Failed")
+            log_err(str(e))
+            return
+
+    # Show AI suggestion
+    print(f"\n{Style.BRIGHT}--- Suggested Commit ---{Style.RESET_ALL}\n{ai_text}\n")
+
+    # Ask user to commit or copy
+    answers = inquirer.prompt([
+        inquirer.Confirm('use', message=f"Commit in {repo_path}?", default=False),
+        inquirer.Confirm('copy', message="Copy to clipboard?", default=False)
+    ])
+
+    if answers['copy']:
+        try:
+            subprocess.run(['pbcopy'], input=ai_text, text=True)
+            log_ok("✅ Copied to clipboard.")
+        except: log_warn("⚠ Copy failed.")
+
+    if answers['use']:
+        try:
+            tmp = repo_path / ".devcli_tmp"
+            tmp.write_text(ai_text)
+            stdout, stderr, code = run_cmd(f'git commit --no-verify -F "{tmp}"', cwd=repo_path)
+            tmp.unlink()
+            if code == 0: log_ok("✅ Committed.")
+            else: log_err(f"❌ Commit failed: {stderr}")
+        except Exception as e:
+            log_err(f"❌ Error: {e}")
 async def feature_track():
     global tracking
     log_info("\n⏱️ Active Time Tracker")
