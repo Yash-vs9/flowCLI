@@ -278,14 +278,14 @@ async def main():
     
     while True:
         try:
-            cmd = input(f"\n{Fore.YELLOW}devcli>{Style.RESET_ALL} ").strip().lower()
+            cmd = input(f"\n{Fore.YELLOW}flowcli>{Style.RESET_ALL} ").strip().lower()
             if cmd == 'exit': log_ok(" Goodbye!"); break
             elif cmd in commands:
                 if asyncio.iscoroutinefunction(commands[cmd]):await commands[cmd]()
                 else:commands[cmd]()
             elif cmd == '':continue
             else:log_err(f"Unknown command: {cmd}. Type 'help' for available commands.")
-        except (KeyboardInterrupt, EOFError):break
+        except (KeyboardInterrupt, EOFError,asyncio.CancelledError):return
 if __name__ == "__main__": 
     try: asyncio.run(main())
     except Exception as e: log_err(f"Fatal: {e}"); sys.exit(1)
