@@ -48,19 +48,30 @@ devcli>
 ```
 
 
-What Problem It Solves:
+## What Problem It Solves
 
-Instead of juggling multiple tools for:
-	•	Writing commit messages
-		- A developer main confusion is what commit message to write, so this feature solves it quite accurately using AI.
-	•	Checking dependencies for vulnerabilities
-		- If you want to check whether your dependencies are safe and upto date then this feature comes in clutch.
-	•	Tracking productivity/active time
-		- If you want to track the amount of time you have spent coding, this tool is perfect for you.
-	•	Debugging APIs
-		-It can perform all HTTP request so a developer can integrate it in his workflow.
-	•	Finding large files
-		-Want to check for duplicate or large files? This tool is for you.
-		
- flowCLI combines everything into one powerful CLI tool, enhanced with AI assistance.
+flowCLI saves developers from juggling multiple tools by combining them into one AI-powered CLI.  
 
+Here’s what it solves point by point:  
+
+1. **Writing Commit Messages**  
+   - Developers often get confused about what commit message to write.  
+   - This feature solves it by generating accurate commit messages using AI.  
+
+2. **Checking Dependencies for Vulnerabilities**  
+   - Keeps your dependencies safe and up to date.  
+   - Quickly checks for vulnerabilities in your project.  
+
+3. **Tracking Productivity / Active Time**  
+   - Helps track how much time you’ve spent coding.  
+   - Perfect for monitoring your workflow.  
+
+4. **Debugging APIs**  
+   - Supports all HTTP requests (GET, POST, PUT, DELETE, etc.).  
+   - Lets developers integrate it directly into their workflow.  
+
+5. **Finding Large or Duplicate Files**  
+   - Detects duplicate files in your project.  
+   - Finds large files that may bloat your repo.  
+
+In short: **flowCLI combines everything into one powerful CLI tool, enhanced with AI assistance.**
