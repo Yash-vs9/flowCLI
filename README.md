@@ -1,4 +1,4 @@
-FlowCLI 
+# FlowCLI 
 
 An AI-powered developer CLI assistant that simplifies your workflow.
 It integrates with OpenAI, helps generate commit messages, scans dependencies, tracks active time, analyzes API responses, and more — all directly from your terminal.
@@ -6,7 +6,7 @@ Written in Python in just 250 Lines.
 
 ⸻
 
- Features
+ ## Features
 	•	AI-Powered Commit Messages
 	•	Dependency Security Scanner
 	•	Active Time Tracker
@@ -16,10 +16,10 @@ Written in Python in just 250 Lines.
 
 ⸻
 
- Installation
+ ## Installation
 	1.	Clone this repository
 	2.	Install dependencies:
-Requirements:
+## Requirements:
 	•	openai
 	•	colorama
 	•	pyfiglet
@@ -36,16 +36,19 @@ OPENAI_API_KEY=your_api_key_here
 Usage
 
 Run the CLI:
+```
 python3 devcli.py
+```
 
 You’ll see a banner and a prompt:
-
+```
 flowCLI
 Developer CLI Tool - Type 'help' for commands
 devcli>
+```
 
 
- Problem It Solves
+What Problem It Solves:
 
 Instead of juggling multiple tools for:
 	•	Writing commit messages
