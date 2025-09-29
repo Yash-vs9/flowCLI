@@ -71,19 +71,10 @@ def show_help():
     print(help_text)
 
 async def feature_commit():
-    log_info("\n🤖 AI Commit Message Generator")
+    log_info("\n AI Commit Message Generator")
     repo_path = Path(
         inquirer.prompt([inquirer.Text('repo_path', message="Git repo path (empty=current)", default=os.getcwd())])['repo_path']
     ).resolve()
-
-    # Initialize git if not exists
-    if not (repo_path / ".git").exists():
-        log_warn("⚠ No Git repository found.")
-        if inquirer.prompt([inquirer.Confirm('init', message="Initialize git repo?", default=False)])['init']:
-            stdout, stderr, code = run_cmd("git init", cwd=repo_path)
-            if code == 0: log_ok("✅ Git repo initialized.")
-            else: log_err(f"Failed: {stderr}"); return
-        else: log_err("Aborting."); return
 
     # Get staged diff
     stdout, stderr, code = run_cmd("git diff --cached --unified=0", cwd=repo_path)
@@ -127,7 +118,7 @@ Format: <type>(<scope>): <title>
     if answers['copy']:
         try:
             subprocess.run(['pbcopy'], input=ai_text, text=True)
-            log_ok("✅ Copied to clipboard.")
+            log_ok(" Copied to clipboard.")
         except: log_warn("⚠ Copy failed.")
 
     if answers['use']:
@@ -141,14 +132,15 @@ Format: <type>(<scope>): <title>
         except Exception as e:log_err(f"Error: {e}")
 async def feature_track():
     global tracking
-    log_info("\n⏱️ Active Time Tracker")
+    log_info("\n⏱ Active Time Tracker")
+    log_info("Timer will pause if user did not type anything for 60 seconds straight")
     start_tracking()
     log_info("Tracking keyboard activity... Press Ctrl+C to stop.\n")
     try:
         while True:
             mins, secs = divmod(active_time, 60)
             hrs, mins = divmod(mins, 60)
-            print(f"\r🕒 Active Time: {int(hrs):02}:{int(mins):02}:{int(secs):02}", end="")
+            print(f"\r Active Time: {int(hrs):02}:{int(mins):02}:{int(secs):02}", end="")
             time.sleep(1)
     except KeyboardInterrupt:
         tracking = False  
@@ -187,7 +179,8 @@ async def feature_scanfiles():
     else: print("No large files found.")
 
 async def feature_security():
-    log_info("\n🔐 Dependency Security Scanner")
+    log_info("\n Dependency Security Scanner")
+    log_info("   Will scan files like package.json,pom.xml for vulnerable dependencies")
     scan_path = Path(inquirer.prompt([inquirer.Text('path', message="Project path (empty=current)", default=os.getcwd())])['path']).resolve()
 
     package_files = [f for f in ['package.json', 'requirements.txt', 'Pipfile', 'pom.xml', 'build.gradle'] if (scan_path / f).exists()]
@@ -261,7 +254,9 @@ async def feature_api():
                     ai_s.ok(" Analysis ready.")
                     print(f"\n{Style.BRIGHT}--- AI Analysis ---{Style.RESET_ALL}\n{summary}\n{Style.BRIGHT}-------------------{Style.RESET_ALL}\n")
                 except Exception as e: ai_s.fail(" AI failed."); log_err(str(e))
-        except Exception as e: s.fail(" Failed."); log_err(str(e))
+        except Exception as e: 
+            s.fail(" Failed."); 
+            log_err(str(e))
 
 async def main():
     banner()
@@ -279,13 +274,16 @@ async def main():
     while True:
         try:
             cmd = input(f"\n{Fore.YELLOW}flowcli>{Style.RESET_ALL} ").strip().lower()
-            if cmd == 'exit': log_ok(" Goodbye!"); break
+            if cmd == 'exit': 
+                log_ok(" Goodbye!")
+                break
             elif cmd in commands:
                 if asyncio.iscoroutinefunction(commands[cmd]):await commands[cmd]()
                 else:commands[cmd]()
             elif cmd == '':continue
             else:log_err(f"Unknown command: {cmd}. Type 'help' for available commands.")
-        except (KeyboardInterrupt, EOFError,asyncio.CancelledError):return
+        except (KeyboardInterrupt, EOFError,asyncio.CancelledError):
+            return
 if __name__ == "__main__": 
     try: asyncio.run(main())
     except Exception as e: log_err(f"Fatal: {e}"); sys.exit(1)
