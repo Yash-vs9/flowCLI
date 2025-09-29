@@ -1,0 +1,9 @@
+click
+inquirer
+colorama
+pyfiglet
+yaspin
+python-dotenv
+openai
+requests
+pynput
